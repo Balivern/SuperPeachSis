@@ -116,4 +116,5 @@ public class Player {
     public State getState() { return state; }
     public void setState(State state) { this.state = state; }
     public void setOnGround(boolean onGround) { this.onGround = onGround; }
+    public void setDrawHeight(int drawHeight) { this.drawHeight = drawHeight; }
 }

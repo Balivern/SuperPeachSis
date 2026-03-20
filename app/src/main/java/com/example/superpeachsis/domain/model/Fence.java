@@ -12,8 +12,8 @@ public class Fence extends Block {
     public boolean broken = false;
     public Pattern expectedPattern;
 
-    public void spawn(Bitmap bitmap, Bitmap brokenBitmap, int x, int y, Pattern pattern) {
-        super.spawn(bitmap, x, y);
+    public void spawn(Bitmap bitmap, Bitmap brokenBitmap, int x, int y, int drawWidth, int drawHeight, Pattern pattern) {
+        super.spawn(bitmap, x, y, drawWidth, drawHeight);
         this.originalBitmap = bitmap;
         this.brokenBitmap = brokenBitmap;
         this.broken = false;
@@ -24,7 +24,7 @@ public class Fence extends Block {
         this.broken = true;
         this.bitmap = brokenBitmap;
     }
-    
+
     public void reset() {
         this.broken = false;
         this.bitmap = originalBitmap;
