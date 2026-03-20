@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import com.example.superpeachsis.domain.model.Player;
 import com.example.superpeachsis.utils.SpriteManager;
 
 import java.util.List;
@@ -15,17 +16,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     private GameThread thread;
     private SpriteManager spriteManager;
+    private Player player;
 
-    private List<Bitmap> walkFrames;
-    private Bitmap idleFrame;
     private Bitmap backgroundBitmap;
-
-    private int frameIndex = 0;
-    private int frameTick = 0;
-    private static final int TICKS_PER_FRAME = 12;
-
-    private int playerX = 200;
-    private int playerY = 400;
 
     public GameView(Context context) {
         super(context);
@@ -34,11 +27,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         thread = new GameThread(getHolder(), this);
         setFocusable(true);
         loadSprites();
+        player = new Player(200, 400, spriteManager);
     }
 
     private void loadSprites() {
-        walkFrames = spriteManager.getCharacterFrames("pink", "walk_a", "walk_b");
-        idleFrame = spriteManager.loadBitmap("characters/character_pink_idle.png");
         backgroundBitmap = spriteManager.getBackground("background_color_trees");
     }
 
@@ -80,26 +72,14 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             canvas.drawBitmap(bg, 0, 0, null);
         }
 
-        Bitmap currentFrame = getCurrentFrame();
-        if (currentFrame != null) {
-            canvas.drawBitmap(currentFrame, playerX, playerY, null);
+        if (player != null) {
+            player.draw(canvas);
         }
-    }
-
-    private Bitmap getCurrentFrame() {
-        if (walkFrames != null && !walkFrames.isEmpty()) {
-            return walkFrames.get(frameIndex);
-        }
-        return idleFrame;
     }
 
     public void update() {
-        frameTick++;
-        if (frameTick >= TICKS_PER_FRAME) {
-            frameTick = 0;
-            if (walkFrames != null && !walkFrames.isEmpty()) {
-                frameIndex = (frameIndex + 1) % walkFrames.size();
-            }
+        if (player != null) {
+            player.update();
         }
     }
 }
