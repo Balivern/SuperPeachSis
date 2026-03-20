@@ -1,12 +1,19 @@
 package com.example.superpeachsis;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+
+import com.example.superpeachsis.domain.service.HUD;
+import com.example.superpeachsis.ui.GameOverActivity;
+import com.example.superpeachsis.ui.MenuActivity;
 
 import com.example.superpeachsis.utils.Camera;
 import com.example.superpeachsis.utils.CollisionManager;
@@ -24,6 +31,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private SpriteManager spriteManager;
     private Camera camera;
     private Player player;
+    private final HUD hud;
 
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
@@ -57,6 +65,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private final Random random = new Random();
     private int nextSpawnTick = 60;
     private int lives = 3;
+    private int coins = 0;
     private boolean gameOver = false;
 
     private final Rect bgRect = new Rect();
@@ -68,6 +77,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         spriteManager = SpriteManager.getInstance(context);
         camera = new Camera(10f);
         thread = new GameThread(getHolder(), this);
+        hud = new HUD(spriteManager);
+        hud.setListener(() -> {
+            Context ctx = getContext();
+            Intent intent = new Intent(ctx, MenuActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            ctx.startActivity(intent);
+        });
         setFocusable(true);
         loadSprites();
         player = new Player(200, 400, spriteManager);
@@ -137,6 +153,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         drawGround(canvas);
         drawBlocks(canvas);
         drawPlayer(canvas);
+        hud.draw(canvas, screenWidth, screenHeight);
     }
 
     private void drawBackground(Canvas canvas) {
@@ -184,6 +201,16 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_UP) {
+            hud.onTouch(event.getX(), event.getY());
+        }
+        return true;
+    }
+
+    public HUD getHud() { return hud; }
+
     public void update() {
         if (gameOver) {
             return;
@@ -191,7 +218,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
         tickCount++;
         updateDifficulty();
+        hud.update();
+        if (hud.isPaused()) return;
+
         camera.update();
+        hud.setDistance((int) (camera.getX() / 10));
 
         if (player != null) {
             player.update();
@@ -253,6 +284,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
                 case TOP:
                     player.setY(block.getRect().top - playerRect.height());
                     player.setVy(0);
+                    coins++;
+                    block.active = false;
                     break;
                 case LEFT:
                 case RIGHT:
@@ -267,9 +300,25 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     private void loseLife() {
         lives--;
+        hud.setLives(lives);
         if (lives <= 0) {
             gameOver = true;
+            launchGameOver();
         }
+    }
+
+    private void launchGameOver() {
+        post(() -> {
+            Context ctx = getContext();
+            Intent intent = new Intent(ctx, GameOverActivity.class);
+            intent.putExtra(GameOverActivity.EXTRA_DISTANCE, (int) (camera.getX() / 10));
+            intent.putExtra(GameOverActivity.EXTRA_COINS, coins);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            ctx.startActivity(intent);
+            if (ctx instanceof Activity) {
+                ((Activity) ctx).finish();
+            }
+        });
     }
 
     public int getLives() {
