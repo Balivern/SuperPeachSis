@@ -6,32 +6,41 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Rect;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import com.example.superpeachsis.domain.model.Block;
+import com.example.superpeachsis.domain.model.Enemy;
+import com.example.superpeachsis.domain.model.Player;
 import com.example.superpeachsis.domain.service.HUD;
 import com.example.superpeachsis.ui.GameOverActivity;
 import com.example.superpeachsis.ui.MenuActivity;
-
 import com.example.superpeachsis.utils.Camera;
 import com.example.superpeachsis.utils.CollisionManager;
-import com.example.superpeachsis.domain.model.Player;
-import com.example.superpeachsis.domain.model.Block;
 import com.example.superpeachsis.utils.SpriteManager;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
-public class GameView extends SurfaceView implements SurfaceHolder.Callback {
+public class GameView extends SurfaceView implements SurfaceHolder.Callback, SensorEventListener {
 
     private GameThread thread;
     private SpriteManager spriteManager;
     private Camera camera;
     private Player player;
     private final HUD hud;
+
+    private SensorManager sensorManager;
+    private Sensor lightSensor;
 
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
@@ -41,6 +50,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private static final float PARALLAX_FACTOR = 0.3f;
     private static final int POOL_SIZE = 30;
     private static final int BASE_GAME_SPEED = 6;
+    private static final int ENEMY_POOL_SIZE = 5;
+    private static final long TRAIL_LIFETIME = 300;
 
     private int screenWidth;
     private int screenHeight;
@@ -62,6 +73,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     private final List<Block> blockPool = new ArrayList<>();
     private final List<Bitmap> blockBitmaps = new ArrayList<>();
+    private final List<Enemy> enemyPool = new ArrayList<>();
+    private final List<Bitmap> sawFrames = new ArrayList<>();
+    private Bitmap sawDeathBitmap;
     private final Random random = new Random();
     private int nextSpawnTick = 60;
     private int lives = 3;
@@ -71,10 +85,25 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private final Rect bgRect = new Rect();
     private final Rect tileRect = new Rect();
 
+    private Paint trailPaint;
+    private final List<TrailPoint> trailPoints = new ArrayList<>();
+
+    private static class TrailPoint {
+        float x, y;
+        long timestamp;
+        TrailPoint(float x, float y) {
+            this.x = x;
+            this.y = y;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+
     public GameView(Context context) {
         super(context);
         getHolder().addCallback(this);
         spriteManager = SpriteManager.getInstance(context);
+        sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
         camera = new Camera(10f);
         thread = new GameThread(getHolder(), this);
         hud = new HUD(spriteManager);
@@ -87,6 +116,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         setFocusable(true);
         loadSprites();
         player = new Player(200, 400, spriteManager);
+        trailPaint = new Paint();
+        trailPaint.setColor(Color.RED);
+        trailPaint.setStrokeWidth(8f);
+        trailPaint.setStyle(Paint.Style.STROKE);
+        trailPaint.setStrokeJoin(Paint.Join.ROUND);
+        trailPaint.setStrokeCap(Paint.Cap.ROUND);
+        trailPaint.setAntiAlias(true);
     }
 
     private void loadSprites() {
@@ -102,12 +138,24 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         for (int i = 0; i < POOL_SIZE; i++) {
             blockPool.add(new Block());
         }
+
+        sawFrames.add(spriteManager.loadBitmap("enemies/saw_a.png"));
+        sawFrames.add(spriteManager.loadBitmap("enemies/saw_b.png"));
+        sawDeathBitmap = spriteManager.loadBitmap("enemies/saw_rest.png");
+
+        for (int i = 0; i < ENEMY_POOL_SIZE; i++) {
+            enemyPool.add(new Enemy());
+        }
     }
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
         screenWidth = getWidth();
         screenHeight = getHeight();
+
+        if (lightSensor != null) {
+            sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_GAME);
+        }
 
         if (player != null) {
             player.setX(screenWidth / 4f);
@@ -139,6 +187,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             }
             retry = false;
         }
+        sensorManager.unregisterListener(this);
     }
 
     @Override
@@ -152,7 +201,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         drawBackground(canvas);
         drawGround(canvas);
         drawBlocks(canvas);
+        drawEnemies(canvas);
         drawPlayer(canvas);
+        drawTrail(canvas);
         hud.draw(canvas, screenWidth, screenHeight);
     }
 
@@ -195,18 +246,65 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
+    private void drawEnemies(Canvas canvas) {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (enemy.active) {
+                canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
+            }
+        }
+    }
+
     private void drawPlayer(Canvas canvas) {
         if (player != null) {
             player.draw(canvas);
         }
     }
 
+    private void drawTrail(Canvas canvas) {
+        if (trailPoints.size() < 2) return;
+
+        for (int i = 0; i < trailPoints.size() - 1; i++) {
+            TrailPoint p1 = trailPoints.get(i);
+            TrailPoint p2 = trailPoints.get(i + 1);
+
+            long age = System.currentTimeMillis() - p1.timestamp;
+            int alpha = (int) (255 * (1 - (float) age / TRAIL_LIFETIME));
+            if (alpha < 0) alpha = 0;
+
+            trailPaint.setAlpha(alpha);
+            canvas.drawLine(p1.x, p1.y, p2.x, p2.y, trailPaint);
+        }
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_UP) {
+        int action = event.getAction();
+
+        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_DOWN) {
+            trailPoints.add(new TrailPoint(event.getX(), event.getY()));
+            checkBlockDestruction(event.getX(), event.getY());
+        }
+
+        if (action == MotionEvent.ACTION_UP) {
             hud.onTouch(event.getX(), event.getY());
         }
+
         return true;
+    }
+
+    private void checkBlockDestruction(float tx, float ty) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.bitmap != null) {
+                Rect r = new Rect(block.x, block.y,
+                        block.x + block.bitmap.getWidth(), block.y + block.bitmap.getHeight());
+                if (r.contains((int) tx, (int) ty)) {
+                    block.active = false;
+                    coins++;
+                }
+            }
+        }
     }
 
     public HUD getHud() { return hud; }
@@ -237,16 +335,33 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             }
 
             checkBlockCollisions();
+            checkEnemyCollisions();
         }
 
         nextSpawnTick--;
         if (nextSpawnTick <= 0) {
-            spawnBlock();
+            if (random.nextBoolean()) {
+                spawnBlock();
+            } else {
+                spawnEnemy();
+            }
             nextSpawnTick = 60 + random.nextInt(120);
         }
 
         for (int i = 0; i < blockPool.size(); i++) {
             blockPool.get(i).update(gameSpeed);
+        }
+
+        for (int i = 0; i < enemyPool.size(); i++) {
+            enemyPool.get(i).update(gameSpeed);
+        }
+
+        long now = System.currentTimeMillis();
+        Iterator<TrailPoint> it = trailPoints.iterator();
+        while (it.hasNext()) {
+            if (now - it.next().timestamp > TRAIL_LIFETIME) {
+                it.remove();
+            }
         }
     }
 
@@ -264,6 +379,17 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
                 int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
                 block.spawn(randomBitmap, screenWidth, blockY);
+                return;
+            }
+        }
+    }
+
+    private void spawnEnemy() {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (!enemy.active) {
+                int groundY = screenHeight - TILE_SIZE - 64;
+                enemy.spawn(sawFrames, sawDeathBitmap, screenWidth, groundY);
                 return;
             }
         }
@@ -298,6 +424,38 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
+    private void checkEnemyCollisions() {
+        Rect playerRect = player.getRect();
+
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (!enemy.active || enemy.isDead) {
+                continue;
+            }
+
+            Rect enemyRect = new Rect(enemy.x, enemy.y,
+                    enemy.x + enemy.getCurrentBitmap().getWidth(),
+                    enemy.y + enemy.getCurrentBitmap().getHeight());
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, enemyRect);
+
+            switch (side) {
+                case TOP:
+                    player.setVy(-10f);
+                    enemy.kill();
+                    coins++;
+                    break;
+                case LEFT:
+                case RIGHT:
+                    loseLife();
+                    enemy.kill();
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
     private void loseLife() {
         lives--;
         hud.setLives(lives);
@@ -319,6 +477,29 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
                 ((Activity) ctx).finish();
             }
         });
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
+            float lux = event.values[0];
+            if (lux < 10) {
+                killAllEnemies();
+            }
+        }
+    }
+
+    private void killAllEnemies() {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (enemy.active && !enemy.isDead) {
+                enemy.kill();
+            }
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
     }
 
     public int getLives() {
