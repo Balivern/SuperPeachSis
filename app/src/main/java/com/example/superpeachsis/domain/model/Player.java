@@ -27,6 +27,7 @@ public class Player {
 
     private static final float GRAVITY = 0.8f;
     private static final float MAX_VY = 15f;
+    private static final float JUMP_FORCE = 20f;
     private int drawHeight = 128;
     private int drawWidth = 128;
 
@@ -38,6 +39,13 @@ public class Player {
         this.state = State.RUNNING;
         loadSprites(spriteManager);
         lastFrameTime = System.currentTimeMillis();
+    }
+
+    public void jump() {
+        if (vy >= 0) {
+            vy = -JUMP_FORCE;
+            state = State.JUMPING;
+        }
     }
 
     private void loadSprites(SpriteManager spriteManager) {
@@ -89,10 +97,18 @@ public class Player {
         }
     }
 
+    private final Rect rect = new Rect();
+
+    public Rect getRect() {
+        rect.set((int) x, (int) y, (int) x + drawWidth, (int) y + drawHeight);
+        return rect;
+    }
+
     public float getX() { return x; }
     public float getY() { return y; }
     public void setX(float x) { this.x = x; }
     public void setY(float y) { this.y = y; }
+    public float getVy() { return vy; }
     public void setVy(float vy) { this.vy = vy; }
     public int getDrawHeight() { return drawHeight; }
     public State getState() { return state; }
