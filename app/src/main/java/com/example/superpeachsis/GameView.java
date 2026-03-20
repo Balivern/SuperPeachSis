@@ -28,7 +28,6 @@ import com.example.superpeachsis.utils.CollisionManager;
 import com.example.superpeachsis.utils.SpriteManager;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
@@ -42,6 +41,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     private SensorManager sensorManager;
     private Sensor lightSensor;
+    private boolean isLightSensorCovered = false;
 
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
@@ -269,7 +269,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         for (int i = 0; i < fencePool.size(); i++) {
             Fence fence = fencePool.get(i);
             if (fence.active && fence.bitmap != null) {
-                canvas.drawBitmap(fence.bitmap, fence.x, fence.y, null);
+                if (fence.broken && fence.deathAnimationTimer > 0) {
+                    if ((fence.deathAnimationTimer / 5) % 2 == 0) {
+                        canvas.drawBitmap(fence.bitmap, fence.x, fence.y, null);
+                    }
+                } else {
+                    canvas.drawBitmap(fence.bitmap, fence.x, fence.y, null);
+                }
             }
         }
     }
@@ -314,10 +320,15 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void drawEnemies(Canvas canvas) {
-        for (int i = 0; i < enemyPool.size(); i++) {
-            Enemy enemy = enemyPool.get(i);
+        for (Enemy enemy : enemyPool) {
             if (enemy.active) {
-                canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
+                if (enemy.isDead) {
+                    if ((enemy.deathAnimationTimer / 5) % 2 == 0) {
+                        canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
+                    }
+                } else {
+                    canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
+                }
             }
         }
     }
@@ -703,9 +714,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
             float lux = event.values[0];
-            if (lux < 10) {
+            boolean currentlyCovered = (lux < 10);
+
+            if (currentlyCovered && !isLightSensorCovered) {
                 killAllEnemies();
             }
+
+            isLightSensorCovered = currentlyCovered;
         }
     }
 
