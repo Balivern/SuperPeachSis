@@ -38,6 +38,11 @@
             android:exported="false"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize" />
+        <activity
+            android:name=".ui.ScoreBoardActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize" />
     </application>
 
 </manifest>
