@@ -239,6 +239,8 @@ public class MenuActivity extends Activity {
                     }, 200);
                 } else if (btnScores != null && btnScores.contains(x, y)) {
                     startActivity(new Intent(MenuActivity.this, ScoreBoardActivity.class));
+                } else if (btnQuitter != null && btnQuitter.contains(x, y)) {
+                    finishAffinity();
                 }
             }
             return true;
