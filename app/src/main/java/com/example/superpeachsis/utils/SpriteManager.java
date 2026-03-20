@@ -89,4 +89,11 @@ public class SpriteManager {
         }
         cache.clear();
     }
+
+    public static void reset() {
+        if (instance != null) {
+            instance.clearCache();
+            instance = null;
+        }
+    }
 }

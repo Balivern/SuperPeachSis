@@ -20,6 +20,7 @@ import android.view.Window;
 import android.view.WindowManager;
 
 import com.example.superpeachsis.MainActivity;
+import com.example.superpeachsis.utils.SpriteManager;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,6 +47,11 @@ public class MenuActivity extends Activity {
         if (menuView != null) {
             menuView.resetNavigation();
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
     }
 
     class MenuView extends View {
@@ -101,6 +107,7 @@ public class MenuActivity extends Activity {
             bgBitmap      = loadBitmap(am, "backgrounds/background_color_trees.png");
             blockJouer    = loadBitmap(am, "tiles/block_exclamation.png");
             blockScores   = loadBitmap(am, "tiles/block_coin.png");
+            blockQuitter  = loadBitmap(am, "tiles/block_red.png");
             characterIdle = loadBitmap(am, "characters/character_pink_idle.png");
         }
 
@@ -138,6 +145,9 @@ public class MenuActivity extends Activity {
             loadingPaint.setTextAlign(Paint.Align.CENTER);
         }
 
+        private Bitmap blockQuitter;
+        private RectF btnQuitter;
+
         @Override
         protected void onDraw(Canvas canvas) {
             int w = getWidth();
@@ -164,19 +174,21 @@ public class MenuActivity extends Activity {
             canvas.drawText("SuperPeachSis", w / 2f, titleY, titlePaint);
 
             float btnW = w * 0.55f;
-            float btnH = h * 0.13f;
+            float btnH = h * 0.11f;
             float btnCx = w / 2f;
             btnTextPaint.setTextSize(btnH * 0.42f);
 
-            btnJouer  = new RectF(btnCx - btnW / 2f, h * 0.40f, btnCx + btnW / 2f, h * 0.40f + btnH);
-            btnScores = new RectF(btnCx - btnW / 2f, h * 0.58f, btnCx + btnW / 2f, h * 0.58f + btnH);
+            btnJouer   = new RectF(btnCx - btnW / 2f, h * 0.38f, btnCx + btnW / 2f, h * 0.38f + btnH);
+            btnScores  = new RectF(btnCx - btnW / 2f, h * 0.52f, btnCx + btnW / 2f, h * 0.52f + btnH);
+            btnQuitter = new RectF(btnCx - btnW / 2f, h * 0.66f, btnCx + btnW / 2f, h * 0.66f + btnH);
 
-            drawBlockButton(canvas, blockJouer,  btnJouer,  "JOUER");
-            drawBlockButton(canvas, blockScores, btnScores, "SCORES");
+            drawBlockButton(canvas, blockJouer,   btnJouer,   "JOUER");
+            drawBlockButton(canvas, blockScores,  btnScores,  "SCORES");
+            drawBlockButton(canvas, blockQuitter, btnQuitter, "QUITTER");
 
             float charH     = h * 0.18f;
             float charCx    = w * 0.15f;
-            float charBottom = h * 0.52f - bounceOffset;
+            float charBottom = h * 0.50f - bounceOffset;
 
             if (characterIdle != null) {
                 canvas.drawBitmap(characterIdle, null, new RectF(
@@ -223,7 +235,8 @@ public class MenuActivity extends Activity {
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                         startActivity(intent);
                         finish();
-                    }, 50);
+                        overridePendingTransition(0, 0);
+                    }, 200);
                 } else if (btnScores != null && btnScores.contains(x, y)) {
                     startActivity(new Intent(MenuActivity.this, ScoreBoardActivity.class));
                 }
