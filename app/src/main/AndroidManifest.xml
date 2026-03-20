@@ -13,7 +13,9 @@
         android:theme="@style/Theme.SuperPeachSis">
         <activity
             android:name=".ui.MenuActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -22,10 +24,14 @@
         </activity>
         <activity
             android:name=".MainActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize" />
         <activity
             android:name=".ui.GameOverActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize" />
     </application>
 
 </manifest>
