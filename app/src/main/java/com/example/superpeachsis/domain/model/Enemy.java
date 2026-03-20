@@ -7,6 +7,8 @@ import java.util.List;
 
 public class Enemy {
     private List<Bitmap> walkFrames;
+    public int deathAnimationTimer = 0;
+    private static final int DEATH_DURATION = 60;
     private Bitmap deathBitmap;
     public int x, y;
     public int drawWidth, drawHeight;
@@ -52,6 +54,14 @@ public class Enemy {
     public Rect getRect() {
         rect.set(x, y, x + drawWidth, y + drawHeight);
         return rect;
+        if (isDead && deathAnimationTimer > 0) {
+            deathAnimationTimer--;
+            if (deathAnimationTimer == 0) {
+                active = false;
+            }
+        }
+
+        if (x + 100 < 0) active = false;
     }
 
     public Bitmap getCurrentBitmap() {
@@ -60,6 +70,9 @@ public class Enemy {
     }
 
     public void kill() {
-        this.isDead = true;
+        if (!this.isDead) {
+            this.isDead = true;
+            this.deathAnimationTimer = DEATH_DURATION;
+        }
     }
 }
