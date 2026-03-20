@@ -125,7 +125,10 @@ public class HUD {
                 return true;
             }
             if (btnAbandonnerRect != null && btnAbandonnerRect.contains(x, y)) {
-                if (listener != null) listener.onAbandon();
+                if (listener != null) {
+                    listener.onAbandon();
+                    return true;
+                }
                 return true;
             }
             if (pauseButtonRect != null && pauseButtonRect.contains(x, y)) {

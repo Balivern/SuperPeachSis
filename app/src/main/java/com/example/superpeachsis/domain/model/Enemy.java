@@ -48,12 +48,6 @@ public class Enemy {
             }
         }
 
-        if (x + drawWidth < 0) active = false;
-    }
-
-    public Rect getRect() {
-        rect.set(x, y, x + drawWidth, y + drawHeight);
-        return rect;
         if (isDead && deathAnimationTimer > 0) {
             deathAnimationTimer--;
             if (deathAnimationTimer == 0) {
@@ -61,7 +55,12 @@ public class Enemy {
             }
         }
 
-        if (x + 100 < 0) active = false;
+        if (x + drawWidth < 0) active = false;
+    }
+
+    public Rect getRect() {
+        rect.set(x, y, x + drawWidth, y + drawHeight);
+        return rect;
     }
 
     public Bitmap getCurrentBitmap() {

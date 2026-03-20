@@ -26,6 +26,8 @@ import java.io.InputStream;
 
 public class MenuActivity extends Activity {
 
+    private MenuView menuView;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -34,7 +36,16 @@ public class MenuActivity extends Activity {
                 WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN
         );
-        setContentView(new MenuView(this));
+        menuView = new MenuView(this);
+        setContentView(menuView);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (menuView != null) {
+            menuView.resetNavigation();
+        }
     }
 
     class MenuView extends View {
@@ -67,10 +78,21 @@ public class MenuActivity extends Activity {
             }
         };
 
+        void resetNavigation() {
+            navigating = false;
+        }
+
+        private boolean assetsLoaded = false;
+        private Paint loadingPaint;
+
         public MenuView(Context context) {
             super(context);
-            loadAssets();
             setupPaints();
+            new Thread(() -> {
+                loadAssets();
+                assetsLoaded = true;
+                post(this::invalidate);
+            }).start();
             post(animRunnable);
         }
 
@@ -109,12 +131,23 @@ public class MenuActivity extends Activity {
             btnTextPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
             btnTextPaint.setTextAlign(Paint.Align.CENTER);
             btnTextPaint.setShadowLayer(4f, 2f, 2f, Color.BLACK);
+
+            loadingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            loadingPaint.setColor(Color.WHITE);
+            loadingPaint.setTextSize(50f);
+            loadingPaint.setTextAlign(Paint.Align.CENTER);
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             int w = getWidth();
             int h = getHeight();
+
+            if (!assetsLoaded || navigating) {
+                canvas.drawColor(Color.BLACK);
+                canvas.drawText("Chargement...", w / 2f, h / 2f, loadingPaint);
+                return;
+            }
 
             if (bgBitmap != null) {
                 canvas.drawBitmap(bgBitmap, null, new RectF(0, 0, w, h), null);
@@ -174,14 +207,23 @@ public class MenuActivity extends Activity {
             canvas.drawText(label, rect.centerX(), textY, btnTextPaint);
         }
 
+        private boolean navigating = false;
+
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            if (event.getAction() == MotionEvent.ACTION_UP) {
+            if (event.getAction() == MotionEvent.ACTION_UP && !navigating) {
                 float x = event.getX();
                 float y = event.getY();
 
                 if (btnJouer != null && btnJouer.contains(x, y)) {
-                    startActivity(new Intent(MenuActivity.this, MainActivity.class));
+                    navigating = true;
+                    invalidate();
+                    postDelayed(() -> {
+                        Intent intent = new Intent(MenuActivity.this, MainActivity.class);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                        startActivity(intent);
+                        finish();
+                    }, 50);
                 } else if (btnScores != null && btnScores.contains(x, y)) {
                     showScoresDialog();
                 }
