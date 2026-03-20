@@ -7,6 +7,8 @@ import android.graphics.Color;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import com.example.superpeachsis.utils.SpriteManager;
+
 import java.util.List;
 
 public class GameView extends SurfaceView implements SurfaceHolder.Callback {

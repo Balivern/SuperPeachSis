@@ -1,4 +1,4 @@
-package com.example.superpeachsis;
+package com.example.superpeachsis.utils;
 
 import android.content.Context;
 import android.content.res.AssetManager;
