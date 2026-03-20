@@ -97,10 +97,18 @@ public class Player {
         }
     }
 
+    private final Rect rect = new Rect();
+
+    public Rect getRect() {
+        rect.set((int) x, (int) y, (int) x + drawWidth, (int) y + drawHeight);
+        return rect;
+    }
+
     public float getX() { return x; }
     public float getY() { return y; }
     public void setX(float x) { this.x = x; }
     public void setY(float y) { this.y = y; }
+    public float getVy() { return vy; }
     public void setVy(float vy) { this.vy = vy; }
     public int getDrawHeight() { return drawHeight; }
     public State getState() { return state; }
