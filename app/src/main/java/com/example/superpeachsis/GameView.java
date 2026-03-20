@@ -37,7 +37,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private SpriteManager spriteManager;
     private Camera camera;
     private Player player;
-    private final HUD hud;
+    private volatile HUD hud;
 
     private SensorManager sensorManager;
     private Sensor lightSensor;
@@ -46,15 +46,22 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
 
-    private static final int TILE_SIZE = 64;
-    private static final int PLAYER_HEIGHT = 128;
     private static final float PARALLAX_FACTOR = 0.3f;
     private static final int POOL_SIZE = 30;
-    private static final int BASE_GAME_SPEED = 6;
-    private static final int ENEMY_POOL_SIZE = 5;
+    private static final int BASE_GAME_SPEED = 10;
+    private static final int ENEMY_POOL_SIZE = 10;
+    private static final int MIN_SPAWN_DELAY = 20;
+    private static final int BASE_SPAWN_DELAY = 50;
+    private static final int SPAWN_RANGE = 60;
 
     private int screenWidth;
     private int screenHeight;
+    private int tileSize;
+    private int playerHeight;
+    private int blockSize;
+    private int fenceWidth;
+    private int fenceHeight;
+    private int enemySize;
     private int gameSpeed = BASE_GAME_SPEED;
     private int tickCount = 0;
 
@@ -78,7 +85,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private Bitmap fenceBrokenBitmap;
     private final List<Enemy> enemyPool = new ArrayList<>();
 
-    // Drawing mode state
     private boolean drawingMode = false;
     private Fence targetFence = null;
     private final List<TrailPoint> currentStroke = new ArrayList<>();
@@ -90,7 +96,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private final List<Bitmap> sawFrames = new ArrayList<>();
     private Bitmap sawDeathBitmap;
     private final Random random = new Random();
-    private int nextSpawnTick = 60;
+    private int nextSpawnTick = 30;
     private int lives = 3;
     private int coins = 0;
     private boolean gameOver = false;
@@ -108,24 +114,24 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
     }
 
+    private volatile boolean ready = false;
+    private volatile boolean isAbandoning = false;
+    private Paint loadingPaint;
+
     public GameView(Context context) {
         super(context);
         getHolder().addCallback(this);
         spriteManager = SpriteManager.getInstance(context);
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
-        camera = new Camera(10f);
+        camera = new Camera(5f);
         thread = new GameThread(getHolder(), this);
-        hud = new HUD(spriteManager);
-        hud.setListener(() -> {
-            Context ctx = getContext();
-            Intent intent = new Intent(ctx, MenuActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            ctx.startActivity(intent);
-        });
         setFocusable(true);
-        loadSprites();
-        player = new Player(200, 400, spriteManager);
+
+        loadingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        loadingPaint.setColor(Color.WHITE);
+        loadingPaint.setTextSize(48f);
+        loadingPaint.setTextAlign(Paint.Align.CENTER);
 
         drawingPaint = new Paint();
         drawingPaint.setColor(Color.WHITE);
@@ -137,7 +143,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
         overlayPaint = new Paint();
         overlayPaint.setColor(Color.BLACK);
-        overlayPaint.setAlpha(40); // Very light overlay
+        overlayPaint.setAlpha(40);
     }
 
     private void loadSprites() {
@@ -173,41 +179,66 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     public void surfaceCreated(SurfaceHolder holder) {
         screenWidth = getWidth();
         screenHeight = getHeight();
+        computeSizes();
 
         if (lightSensor != null) {
             sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_GAME);
         }
 
-        if (player != null) {
-            player.setX(screenWidth / 4f);
-            player.setY(screenHeight - TILE_SIZE - PLAYER_HEIGHT);
-        }
-
-        if (thread.getState() == Thread.State.TERMINATED) {
+        if (thread.getState() != Thread.State.NEW) {
             thread = new GameThread(getHolder(), this);
         }
         thread.setRunning(true);
         thread.start();
+
+        new Thread(() -> {
+            loadSprites();
+            hud = new HUD(spriteManager);
+            hud.setListener(() -> {
+                isAbandoning = true;
+                post(() -> {
+                    invalidate(); // Force redraw on UI thread
+                    postDelayed(() -> {
+                        Context ctx = getContext();
+                        if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
+                        Intent intent = new Intent(ctx, MenuActivity.class);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                        ctx.startActivity(intent);
+                    }, 50); // Small delay to allow redrawing "Chargement..."
+                });
+            });
+            player = new Player(screenWidth / 4f, screenHeight - tileSize - playerHeight, spriteManager);
+            player.setDrawHeight(playerHeight);
+            ready = true;
+        }).start();
     }
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         screenWidth = width;
         screenHeight = height;
+        computeSizes();
+        if (player != null) {
+            player.setDrawHeight(playerHeight);
+        }
+    }
+
+    private void computeSizes() {
+        tileSize = (int) (screenHeight * 0.08f);
+        playerHeight = (int) (screenHeight * 0.18f);
+        blockSize = (int) (screenHeight * 0.12f);
+        fenceWidth = (int) (screenHeight * 0.08f);
+        fenceHeight = (int) (screenHeight * 0.20f);
+        enemySize = (int) (screenHeight * 0.12f);
     }
 
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
-        boolean retry = true;
-        while (retry) {
-            try {
-                thread.setRunning(false);
-                thread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            retry = false;
-        }
+        thread.setRunning(false);
+        thread.interrupt();
+        try {
+            thread.join(1000);
+        } catch (InterruptedException ignored) {}
         sensorManager.unregisterListener(this);
     }
 
@@ -219,24 +250,32 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
 
         canvas.drawColor(Color.parseColor("#5C94FC"));
+
+        if (!ready || isAbandoning) {
+            canvas.drawColor(Color.BLACK);
+            canvas.drawText("Chargement...", screenWidth / 2f, screenHeight / 2f, loadingPaint);
+            return;
+        }
+
         drawBackground(canvas);
         drawGround(canvas);
         drawBlocks(canvas);
         drawFences(canvas);
         drawEnemies(canvas);
         drawPlayer(canvas);
-        
+
         if (drawingMode) {
             drawDrawingOverlay(canvas);
         }
-        
-        hud.draw(canvas, screenWidth, screenHeight);
+
+        if (hud != null) {
+            hud.draw(canvas, screenWidth, screenHeight);
+        }
     }
 
     private void drawDrawingOverlay(Canvas canvas) {
         canvas.drawRect(0, 0, screenWidth, screenHeight, overlayPaint);
-        
-        // Draw pattern to recognize hint
+
         Paint hintPaint = new Paint();
         hintPaint.setColor(Color.WHITE);
         hintPaint.setTextSize(60);
@@ -246,13 +285,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
 
         drawingPaint.setColor(drawingFailure ? Color.RED : Color.WHITE);
-        
-        // Draw current stroke
+
         drawStroke(canvas, currentStroke);
-        
-        // Draw previous strokes
-        for (List<TrailPoint> stroke : allStrokes) {
-            drawStroke(canvas, stroke);
+
+        for (int i = 0; i < allStrokes.size(); i++) {
+            drawStroke(canvas, allStrokes.get(i));
         }
     }
 
@@ -269,13 +306,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         for (int i = 0; i < fencePool.size(); i++) {
             Fence fence = fencePool.get(i);
             if (fence.active && fence.bitmap != null) {
-                if (fence.broken && fence.deathAnimationTimer > 0) {
-                    if ((fence.deathAnimationTimer / 5) % 2 == 0) {
-                        canvas.drawBitmap(fence.bitmap, fence.x, fence.y, null);
-                    }
-                } else {
-                    canvas.drawBitmap(fence.bitmap, fence.x, fence.y, null);
+                if (fence.broken && fence.deathAnimationTimer > 0 && (fence.deathAnimationTimer / 5) % 2 == 0) {
+                    continue;
                 }
+                canvas.drawBitmap(fence.bitmap, null, fence.getRect(), null);
             }
         }
     }
@@ -299,13 +333,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         if (groundTile == null) {
             return;
         }
-        int groundY = screenHeight - TILE_SIZE;
-        float offsetX = -(camera.getX() % TILE_SIZE);
-        int tilesNeeded = (screenWidth / TILE_SIZE) + 2;
+        int groundY = screenHeight - tileSize;
+        float offsetX = -(camera.getX() % tileSize);
+        int tilesNeeded = (screenWidth / tileSize) + 2;
 
         for (int i = 0; i < tilesNeeded; i++) {
-            int tileX = (int) (offsetX + (i * TILE_SIZE));
-            tileRect.set(tileX, groundY, tileX + TILE_SIZE, groundY + TILE_SIZE);
+            int tileX = (int) (offsetX + (i * tileSize));
+            tileRect.set(tileX, groundY, tileX + tileSize, groundY + tileSize);
             canvas.drawBitmap(groundTile, null, tileRect, null);
         }
     }
@@ -314,21 +348,19 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         for (int i = 0; i < blockPool.size(); i++) {
             Block block = blockPool.get(i);
             if (block.active && block.bitmap != null) {
-                canvas.drawBitmap(block.bitmap, block.x, block.y, null);
+                canvas.drawBitmap(block.bitmap, null, block.getRect(), null);
             }
         }
     }
 
     private void drawEnemies(Canvas canvas) {
-        for (Enemy enemy : enemyPool) {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
             if (enemy.active) {
-                if (enemy.isDead) {
-                    if ((enemy.deathAnimationTimer / 5) % 2 == 0) {
-                        canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
-                    }
-                } else {
-                    canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
+                if (enemy.isDead && enemy.deathAnimationTimer > 0 && (enemy.deathAnimationTimer / 5) % 2 == 0) {
+                    continue;
                 }
+                canvas.drawBitmap(enemy.getCurrentBitmap(), null, enemy.getRect(), null);
             }
         }
     }
@@ -341,6 +373,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (!ready) return true;
+
         int action = event.getAction();
         float x = event.getX();
         float y = event.getY();
@@ -350,11 +384,34 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             return true;
         }
 
+        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_DOWN) {
+            checkBlockDestruction(x, y);
+        }
+
         if (action == MotionEvent.ACTION_UP) {
-            hud.onTouch(x, y);
+            if (hud.onTouch(x, y)) {
+                // Check if abandonment happened by looking at the HUD state (if it had a listener)
+                // or just trust the hud returned true.
+                // In our case hud.onTouch(x,y) returns true if it handled the event.
+                // The HUD listener we set earlier already sets isAbandoning=true.
+                // But the UI might not invalidate immediately if we are in the middle of a loop.
+                return true;
+            }
         }
 
         return true;
+    }
+
+    private void checkBlockDestruction(float tx, float ty) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.bitmap != null) {
+                if (block.getRect().contains((int) tx, (int) ty)) {
+                    block.active = false;
+                    coins++;
+                }
+            }
+        }
     }
 
     private void handleDrawingInput(int action, float x, float y) {
@@ -399,8 +456,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             targetFence = null;
             allStrokes.clear();
         } else {
-            // For circle and line, if failed on one stroke, it's a failure.
-            // For cross, we might need to wait for the second stroke.
             if (targetFence.expectedPattern != Fence.Pattern.CROSS || allStrokes.size() >= 2) {
                 drawingFailure = true;
                 allStrokes.clear();
@@ -413,8 +468,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         TrailPoint start = points.get(0);
         TrailPoint end = points.get(points.size() - 1);
         float dist = (float) Math.hypot(start.x - end.x, start.y - end.y);
-        
-        // End near start
+
         if (dist > 200) return false;
 
         float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
@@ -425,14 +479,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             if (p.y < minY) minY = p.y;
             if (p.y > maxY) maxY = p.y;
         }
-        
+
         float width = maxX - minX;
         float height = maxY - minY;
-        
-        // Significant size
+
         if (width < 100 || height < 100) return false;
-        
-        // Aspect ratio
+
         float ratio = width / height;
         return ratio > 0.5f && ratio < 2.0f;
     }
@@ -449,21 +501,18 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
         float width = maxX - minX;
         float height = maxY - minY;
-        
+
         return width > 200 && height < 100;
     }
 
     private boolean isCross(List<TrailPoint> s1, List<TrailPoint> s2) {
         if (s1.size() < 5 || s2.size() < 5) return false;
-        
-        // Simple intersection check of bounding boxes first
+
         Rect r1 = getBoundingBox(s1);
         Rect r2 = getBoundingBox(s2);
-        
+
         if (!Rect.intersects(r1, r2)) return false;
-        
-        // Check if both are somewhat "diagonal" or just "straight" lines
-        // For simplicity, if they intersect and have significant size, we call it a cross
+
         return r1.width() > 100 && r1.height() > 100 && r2.width() > 100 && r2.height() > 100;
     }
 
@@ -476,18 +525,19 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             if (p.y < minY) minY = p.y;
             if (p.y > maxY) maxY = p.y;
         }
-        return new Rect((int)minX, (int)minY, (int)maxX, (int)maxY);
+        return new Rect((int) minX, (int) minY, (int) maxX, (int) maxY);
     }
 
     public HUD getHud() { return hud; }
 
     public void update() {
-        if (gameOver) {
+        if (!ready || gameOver) {
             return;
         }
 
         tickCount++;
         updateDifficulty();
+        if (hud == null) return;
         hud.update();
         if (hud.isPaused()) return;
 
@@ -497,10 +547,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         if (player != null) {
             player.update();
 
-            int groundY = screenHeight - TILE_SIZE - PLAYER_HEIGHT;
-            if (player.getY() > groundY) {
+            int groundY = screenHeight - tileSize - playerHeight;
+            if (player.getY() >= groundY) {
                 player.setY(groundY);
                 player.setVy(0);
+                player.setOnGround(true);
                 if (player.getState() == Player.State.JUMPING) {
                     player.setState(Player.State.RUNNING);
                 }
@@ -511,9 +562,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             checkEnemyCollisions();
         }
 
-        // Deactivate drawing mode if target is gone or broken
         if (drawingMode && targetFence != null) {
-            if (!targetFence.active || targetFence.broken || targetFence.x + TILE_SIZE < player.getX()) {
+            if (!targetFence.active || targetFence.broken || targetFence.x + tileSize < player.getX()) {
                 drawingMode = false;
                 targetFence = null;
                 allStrokes.clear();
@@ -522,15 +572,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
         nextSpawnTick--;
         if (nextSpawnTick <= 0) {
-            int spawnType = random.nextInt(3);
-            if (spawnType == 0) {
-                spawnBlock();
-            } else if (spawnType == 1) {
-                spawnFence();
-            } else {
-                spawnEnemy();
-            }
-            nextSpawnTick = 60 + random.nextInt(120);
+            spawnObstacle();
+            int delay = Math.max(MIN_SPAWN_DELAY, BASE_SPAWN_DELAY - (tickCount / 300));
+            nextSpawnTick = delay + random.nextInt(Math.max(10, SPAWN_RANGE - (tickCount / 400)));
         }
 
         for (int i = 0; i < blockPool.size(); i++) {
@@ -547,9 +591,61 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void updateDifficulty() {
-        if (tickCount % 600 == 0) {
-            gameSpeed = Math.min(BASE_GAME_SPEED + (tickCount / 600), 14);
-            camera.setSpeed(3f + (tickCount / 600f) * 0.5f);
+        if (tickCount % 300 == 0 && tickCount > 0) {
+            int level = tickCount / 300;
+            gameSpeed = Math.min(BASE_GAME_SPEED + level * 2, 22);
+            camera.setSpeed(5f + level * 0.8f);
+        }
+    }
+
+    private int getRightmostObstacleX() {
+        int maxX = -1;
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.x + block.drawWidth > maxX) {
+                maxX = block.x + block.drawWidth;
+            }
+        }
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (fence.active && fence.x + fence.drawWidth > maxX) {
+                maxX = fence.x + fence.drawWidth;
+            }
+        }
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (enemy.active && enemy.x + enemy.drawWidth > maxX) {
+                maxX = enemy.x + enemy.drawWidth;
+            }
+        }
+        return maxX;
+    }
+
+    private int getSpawnX() {
+        int rightmost = getRightmostObstacleX();
+        int minGap = blockSize + blockSize / 2;
+        int spawnX = screenWidth;
+        if (rightmost > spawnX - minGap) {
+            spawnX = rightmost + minGap;
+        }
+        return spawnX;
+    }
+
+    private void spawnObstacle() {
+        int roll = random.nextInt(100);
+
+        if (roll < 30) {
+            spawnBlock();
+        } else if (roll < 50) {
+            spawnEnemy();
+        } else if (roll < 65) {
+            spawnFence();
+        } else if (roll < 80) {
+            spawnBlock();
+            spawnEnemy();
+        } else {
+            spawnBlock();
+            spawnBlockOffset(blockSize + blockSize / 4);
         }
     }
 
@@ -558,20 +654,33 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             Block block = blockPool.get(i);
             if (!block.active) {
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
-                int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
-                block.spawn(randomBitmap, screenWidth, blockY);
+                int blockY = screenHeight - tileSize - blockSize;
+                block.spawn(randomBitmap, getSpawnX(), blockY, blockSize, blockSize);
+                return;
+            }
+        }
+    }
+
+    private void spawnBlockOffset(int offset) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (!block.active) {
+                Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
+                int blockY = screenHeight - tileSize - blockSize;
+                block.spawn(randomBitmap, getSpawnX() + offset, blockY, blockSize, blockSize);
                 return;
             }
         }
     }
 
     private void spawnFence() {
+        if (fenceBitmap == null) return;
         for (int i = 0; i < fencePool.size(); i++) {
             Fence fence = fencePool.get(i);
             if (!fence.active) {
-                int fenceY = screenHeight - TILE_SIZE - fenceBitmap.getHeight();
+                int fenceY = screenHeight - tileSize - fenceHeight;
                 Fence.Pattern pattern = Fence.Pattern.values()[random.nextInt(Fence.Pattern.values().length)];
-                fence.spawn(fenceBitmap, fenceBrokenBitmap, screenWidth, fenceY, pattern);
+                fence.spawn(fenceBitmap, fenceBrokenBitmap, getSpawnX(), fenceY, fenceWidth, fenceHeight, pattern);
                 return;
             }
         }
@@ -581,8 +690,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         for (int i = 0; i < enemyPool.size(); i++) {
             Enemy enemy = enemyPool.get(i);
             if (!enemy.active) {
-                int groundY = screenHeight - TILE_SIZE - 64;
-                enemy.spawn(sawFrames, sawDeathBitmap, screenWidth, groundY);
+                int groundY = screenHeight - tileSize - enemySize;
+                enemy.spawn(sawFrames, sawDeathBitmap, getSpawnX(), groundY, enemySize);
                 return;
             }
         }
@@ -603,6 +712,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 case TOP:
                     player.setY(block.getRect().top - playerRect.height());
                     player.setVy(0);
+                    player.setOnGround(true);
                     coins++;
                     block.active = false;
                     break;
@@ -627,8 +737,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             }
 
             Rect fenceRect = fence.getRect();
-            
-            // Activate drawing mode if approaching
+
             if (playerRect.right < fenceRect.left && fenceRect.left - playerRect.right < 600) {
                 if (!drawingMode) {
                     startDrawingMode(fence);
@@ -643,6 +752,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             } else if (side == CollisionManager.Side.TOP) {
                 player.setY(fenceRect.top - playerRect.height());
                 player.setVy(0);
+                player.setOnGround(true);
             }
         }
     }
@@ -656,11 +766,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 continue;
             }
 
-            Rect enemyRect = new Rect(enemy.x, enemy.y,
-                    enemy.x + enemy.getCurrentBitmap().getWidth(),
-                    enemy.y + enemy.getCurrentBitmap().getHeight());
-
-            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, enemyRect);
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, enemy.getRect());
 
             switch (side) {
                 case TOP:
@@ -699,14 +805,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private void launchGameOver() {
         post(() -> {
             Context ctx = getContext();
+            if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
             Intent intent = new Intent(ctx, GameOverActivity.class);
             intent.putExtra(GameOverActivity.EXTRA_DISTANCE, (int) (camera.getX() / 10));
             intent.putExtra(GameOverActivity.EXTRA_COINS, coins);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
             ctx.startActivity(intent);
-            if (ctx instanceof Activity) {
-                ((Activity) ctx).finish();
-            }
         });
     }
 
@@ -753,5 +857,16 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         if (player != null) {
             player.jump();
         }
+    }
+
+    public void cleanup() {
+        if (thread != null) {
+            thread.setRunning(false);
+            thread.interrupt();
+            try {
+                thread.join(500);
+            } catch (InterruptedException ignored) {}
+        }
+        sensorManager.unregisterListener(this);
     }
 }

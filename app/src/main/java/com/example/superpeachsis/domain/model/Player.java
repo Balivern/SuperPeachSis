@@ -28,6 +28,7 @@ public class Player {
     private static final float GRAVITY = 0.8f;
     private static final float MAX_VY = 15f;
     private static final float JUMP_FORCE = 20f;
+    private boolean onGround = false;
     private int drawHeight = 128;
     private int drawWidth = 128;
 
@@ -42,7 +43,8 @@ public class Player {
     }
 
     public void jump() {
-        if (vy >= 0) {
+        if (onGround) {
+            onGround = false;
             vy = -JUMP_FORCE;
             state = State.JUMPING;
         }
@@ -113,4 +115,6 @@ public class Player {
     public int getDrawHeight() { return drawHeight; }
     public State getState() { return state; }
     public void setState(State state) { this.state = state; }
+    public void setOnGround(boolean onGround) { this.onGround = onGround; }
+    public void setDrawHeight(int drawHeight) { this.drawHeight = drawHeight; }
 }

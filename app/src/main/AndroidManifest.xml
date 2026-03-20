@@ -14,16 +14,20 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SuperPeachSis">
         <activity
-            android:name=".ui.MenuActivity"
+            android:name=".ui.SplashActivity"
             android:exported="true"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ui.MenuActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize" />
         <activity
             android:name=".MainActivity"
             android:exported="false"
