@@ -21,6 +21,7 @@ import android.view.WindowManager;
 
 import com.example.superpeachsis.MainActivity;
 import com.example.superpeachsis.domain.service.ScoreManager;
+import com.example.superpeachsis.utils.SoundManager;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,6 +58,7 @@ public class GameOverActivity extends Activity {
         } catch (Exception e) {
             e.printStackTrace();
         }
+        SoundManager.getInstance(this).playMusic(SoundManager.MUSIC_GAMEOVER);
 
         gameOverView = new GameOverView(this, distance, coins, score);
         setContentView(gameOverView);
@@ -274,6 +276,7 @@ public class GameOverActivity extends Activity {
 
         private void startNavigation(Class<?> activityClass) {
             navigating = true;
+            SoundManager.getInstance(getContext()).stopMusic();
             invalidate();
             mainHandler.postDelayed(() -> {
                 Context context = getContext();

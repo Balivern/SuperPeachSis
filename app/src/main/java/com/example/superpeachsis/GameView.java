@@ -25,6 +25,7 @@ import com.example.superpeachsis.ui.GameOverActivity;
 import com.example.superpeachsis.ui.MenuActivity;
 import com.example.superpeachsis.utils.Camera;
 import com.example.superpeachsis.utils.CollisionManager;
+import com.example.superpeachsis.utils.SoundManager;
 import com.example.superpeachsis.utils.SpriteManager;
 
 import java.util.ArrayList;
@@ -114,6 +115,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
     }
 
+    private SoundManager soundManager;
+    private boolean wasPaused = false;
+
     private volatile boolean ready = false;
     private volatile boolean isAbandoning = false;
     private Paint loadingPaint;
@@ -122,6 +126,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         super(context);
         getHolder().addCallback(this);
         spriteManager = SpriteManager.getInstance(context);
+        soundManager  = SoundManager.getInstance(context);
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
         camera = new Camera(5f);
@@ -195,9 +200,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             loadSprites();
             hud = new HUD(spriteManager);
             hud.setListener(() -> {
+                soundManager.stopMusic();
                 isAbandoning = true;
                 post(() -> {
-                    invalidate(); // Force redraw on UI thread
+                    invalidate();
                     postDelayed(() -> {
                         Context ctx = getContext();
                         if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
@@ -207,12 +213,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                         if (ctx instanceof Activity) {
                             ((Activity) ctx).overridePendingTransition(0, 0);
                         }
-                    }, 200); // More time to see the "Chargement..." and snappy transition
+                    }, 200);
                 });
             });
             player = new Player(screenWidth / 4f, screenHeight - tileSize - playerHeight, spriteManager);
             player.setDrawHeight(playerHeight);
             ready = true;
+            soundManager.playMusic(SoundManager.MUSIC_GAME);
         }).start();
     }
 
@@ -542,7 +549,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         updateDifficulty();
         if (hud == null) return;
         hud.update();
-        if (hud.isPaused()) return;
+        boolean isPaused = hud.isPaused();
+        if (isPaused && !wasPaused) soundManager.pauseMusic();
+        else if (!isPaused && wasPaused) soundManager.resumeMusic();
+        wasPaused = isPaused;
+        if (isPaused) return;
 
         camera.update();
         hud.setDistance((int) (camera.getX() / 10));
@@ -695,6 +706,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             if (!enemy.active) {
                 int groundY = screenHeight - tileSize - enemySize;
                 enemy.spawn(sawFrames, sawDeathBitmap, getSpawnX(), groundY, enemySize);
+                soundManager.playGhostAppear();
                 return;
             }
         }
@@ -718,6 +730,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                     player.setOnGround(true);
                     coins++;
                     block.active = false;
+                    soundManager.playBoxBreak();
                     break;
                 case LEFT:
                 case RIGHT:
@@ -806,6 +819,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void launchGameOver() {
+        soundManager.stopMusic();
         post(() -> {
             Context ctx = getContext();
             if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
@@ -859,6 +873,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     public void triggerJump() {
         if (player != null) {
             player.jump();
+            soundManager.playJump();
         }
     }
 
