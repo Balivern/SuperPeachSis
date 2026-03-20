@@ -1,5 +1,6 @@
 package com.example.superpeachsis;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -11,6 +12,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
 import com.example.superpeachsis.domain.service.HUD;
+import com.example.superpeachsis.ui.GameOverActivity;
 import com.example.superpeachsis.ui.MenuActivity;
 
 import com.example.superpeachsis.utils.Camera;
@@ -29,6 +31,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private SpriteManager spriteManager;
     private Camera camera;
     private Player player;
+    private final HUD hud;
 
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
@@ -62,18 +65,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private final Random random = new Random();
     private int nextSpawnTick = 60;
     private int lives = 3;
+    private int coins = 0;
     private boolean gameOver = false;
 
     private final Rect bgRect = new Rect();
     private final Rect tileRect = new Rect();
-    private HUD hud;
-
-    private List<Block> blockPool = new ArrayList<>();
-    private List<Bitmap> blockBitmaps = new ArrayList<>();
-    private Random random = new Random();
-    private int nextSpawnTick = 0;
-    private final int POOL_SIZE = 10;
-    private final int GAME_SPEED = 10;
 
     public GameView(Context context) {
         super(context);
@@ -121,7 +117,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         if (thread.getState() == Thread.State.TERMINATED) {
             thread = new GameThread(getHolder(), this);
         }
-        thread = new GameThread(getHolder(), this);
         thread.setRunning(true);
         thread.start();
     }
@@ -289,6 +284,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
                 case TOP:
                     player.setY(block.getRect().top - playerRect.height());
                     player.setVy(0);
+                    coins++;
+                    block.active = false;
                     break;
                 case LEFT:
                 case RIGHT:
@@ -303,9 +300,25 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     private void loseLife() {
         lives--;
+        hud.setLives(lives);
         if (lives <= 0) {
             gameOver = true;
+            launchGameOver();
         }
+    }
+
+    private void launchGameOver() {
+        post(() -> {
+            Context ctx = getContext();
+            Intent intent = new Intent(ctx, GameOverActivity.class);
+            intent.putExtra(GameOverActivity.EXTRA_DISTANCE, (int) (camera.getX() / 10));
+            intent.putExtra(GameOverActivity.EXTRA_COINS, coins);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            ctx.startActivity(intent);
+            if (ctx instanceof Activity) {
+                ((Activity) ctx).finish();
+            }
+        });
     }
 
     public int getLives() {
