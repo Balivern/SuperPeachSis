@@ -235,7 +235,8 @@ public class MenuActivity extends Activity {
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                         startActivity(intent);
                         finish();
-                    }, 50);
+                        overridePendingTransition(0, 0);
+                    }, 200);
                 } else if (btnScores != null && btnScores.contains(x, y)) {
                     showScoresDialog();
                 } else if (btnQuitter != null && btnQuitter.contains(x, y)) {

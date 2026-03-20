@@ -204,7 +204,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                         Intent intent = new Intent(ctx, MenuActivity.class);
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                         ctx.startActivity(intent);
-                    }, 50); // Small delay to allow redrawing "Chargement..."
+                        if (ctx instanceof Activity) {
+                            ((Activity) ctx).overridePendingTransition(0, 0);
+                        }
+                    }, 200); // More time to see the "Chargement..." and snappy transition
                 });
             });
             player = new Player(screenWidth / 4f, screenHeight - tileSize - playerHeight, spriteManager);

@@ -284,9 +284,10 @@ public class GameOverActivity extends Activity {
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                         activity.startActivity(intent);
                         activity.finish();
+                        activity.overridePendingTransition(0, 0);
                     }
                 }
-            }, 100);
+            }, 200);
         }
 
         public void cleanup() {
