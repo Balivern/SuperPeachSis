@@ -18,6 +18,7 @@ import android.view.SurfaceView;
 
 import com.example.superpeachsis.domain.model.Block;
 import com.example.superpeachsis.domain.model.Enemy;
+import com.example.superpeachsis.domain.model.Fence;
 import com.example.superpeachsis.domain.model.Player;
 import com.example.superpeachsis.domain.service.HUD;
 import com.example.superpeachsis.ui.GameOverActivity;
@@ -51,7 +52,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private static final int POOL_SIZE = 30;
     private static final int BASE_GAME_SPEED = 6;
     private static final int ENEMY_POOL_SIZE = 5;
-    private static final long TRAIL_LIFETIME = 300;
 
     private int screenWidth;
     private int screenHeight;
@@ -73,7 +73,20 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     private final List<Block> blockPool = new ArrayList<>();
     private final List<Bitmap> blockBitmaps = new ArrayList<>();
+    private final List<Fence> fencePool = new ArrayList<>();
+    private Bitmap fenceBitmap;
+    private Bitmap fenceBrokenBitmap;
     private final List<Enemy> enemyPool = new ArrayList<>();
+
+    // Drawing mode state
+    private boolean drawingMode = false;
+    private Fence targetFence = null;
+    private final List<TrailPoint> currentStroke = new ArrayList<>();
+    private final List<List<TrailPoint>> allStrokes = new ArrayList<>();
+    private Paint drawingPaint;
+    private Paint overlayPaint;
+    private boolean drawingFailure = false;
+
     private final List<Bitmap> sawFrames = new ArrayList<>();
     private Bitmap sawDeathBitmap;
     private final Random random = new Random();
@@ -84,9 +97,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     private final Rect bgRect = new Rect();
     private final Rect tileRect = new Rect();
-
-    private Paint trailPaint;
-    private final List<TrailPoint> trailPoints = new ArrayList<>();
 
     private static class TrailPoint {
         float x, y;
@@ -116,13 +126,18 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         setFocusable(true);
         loadSprites();
         player = new Player(200, 400, spriteManager);
-        trailPaint = new Paint();
-        trailPaint.setColor(Color.RED);
-        trailPaint.setStrokeWidth(8f);
-        trailPaint.setStyle(Paint.Style.STROKE);
-        trailPaint.setStrokeJoin(Paint.Join.ROUND);
-        trailPaint.setStrokeCap(Paint.Cap.ROUND);
-        trailPaint.setAntiAlias(true);
+
+        drawingPaint = new Paint();
+        drawingPaint.setColor(Color.WHITE);
+        drawingPaint.setStrokeWidth(12f);
+        drawingPaint.setStyle(Paint.Style.STROKE);
+        drawingPaint.setStrokeJoin(Paint.Join.ROUND);
+        drawingPaint.setStrokeCap(Paint.Cap.ROUND);
+        drawingPaint.setAntiAlias(true);
+
+        overlayPaint = new Paint();
+        overlayPaint.setColor(Color.BLACK);
+        overlayPaint.setAlpha(40); // Very light overlay
     }
 
     private void loadSprites() {
@@ -137,6 +152,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
         for (int i = 0; i < POOL_SIZE; i++) {
             blockPool.add(new Block());
+        }
+
+        fenceBitmap = spriteManager.loadBitmap("tiles/fence.png");
+        fenceBrokenBitmap = spriteManager.loadBitmap("tiles/fence_broken.png");
+        for (int i = 0; i < 5; i++) {
+            fencePool.add(new Fence());
         }
 
         sawFrames.add(spriteManager.loadBitmap("enemies/saw_a.png"));
@@ -201,10 +222,56 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         drawBackground(canvas);
         drawGround(canvas);
         drawBlocks(canvas);
+        drawFences(canvas);
         drawEnemies(canvas);
         drawPlayer(canvas);
-        drawTrail(canvas);
+        
+        if (drawingMode) {
+            drawDrawingOverlay(canvas);
+        }
+        
         hud.draw(canvas, screenWidth, screenHeight);
+    }
+
+    private void drawDrawingOverlay(Canvas canvas) {
+        canvas.drawRect(0, 0, screenWidth, screenHeight, overlayPaint);
+        
+        // Draw pattern to recognize hint
+        Paint hintPaint = new Paint();
+        hintPaint.setColor(Color.WHITE);
+        hintPaint.setTextSize(60);
+        hintPaint.setTextAlign(Paint.Align.CENTER);
+        if (targetFence != null) {
+            canvas.drawText("Dessinez : " + targetFence.expectedPattern.name(), screenWidth / 2f, 150, hintPaint);
+        }
+
+        drawingPaint.setColor(drawingFailure ? Color.RED : Color.WHITE);
+        
+        // Draw current stroke
+        drawStroke(canvas, currentStroke);
+        
+        // Draw previous strokes
+        for (List<TrailPoint> stroke : allStrokes) {
+            drawStroke(canvas, stroke);
+        }
+    }
+
+    private void drawStroke(Canvas canvas, List<TrailPoint> stroke) {
+        if (stroke.size() < 2) return;
+        for (int i = 0; i < stroke.size() - 1; i++) {
+            TrailPoint p1 = stroke.get(i);
+            TrailPoint p2 = stroke.get(i + 1);
+            canvas.drawLine(p1.x, p1.y, p2.x, p2.y, drawingPaint);
+        }
+    }
+
+    private void drawFences(Canvas canvas) {
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (fence.active && fence.bitmap != null) {
+                canvas.drawBitmap(fence.bitmap, fence.x, fence.y, null);
+            }
+        }
     }
 
     private void drawBackground(Canvas canvas) {
@@ -261,50 +328,144 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
     }
 
-    private void drawTrail(Canvas canvas) {
-        if (trailPoints.size() < 2) return;
-
-        for (int i = 0; i < trailPoints.size() - 1; i++) {
-            TrailPoint p1 = trailPoints.get(i);
-            TrailPoint p2 = trailPoints.get(i + 1);
-
-            long age = System.currentTimeMillis() - p1.timestamp;
-            int alpha = (int) (255 * (1 - (float) age / TRAIL_LIFETIME));
-            if (alpha < 0) alpha = 0;
-
-            trailPaint.setAlpha(alpha);
-            canvas.drawLine(p1.x, p1.y, p2.x, p2.y, trailPaint);
-        }
-    }
-
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         int action = event.getAction();
+        float x = event.getX();
+        float y = event.getY();
 
-        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_DOWN) {
-            trailPoints.add(new TrailPoint(event.getX(), event.getY()));
-            checkBlockDestruction(event.getX(), event.getY());
+        if (drawingMode) {
+            handleDrawingInput(action, x, y);
+            return true;
         }
 
         if (action == MotionEvent.ACTION_UP) {
-            hud.onTouch(event.getX(), event.getY());
+            hud.onTouch(x, y);
         }
 
         return true;
     }
 
-    private void checkBlockDestruction(float tx, float ty) {
-        for (int i = 0; i < blockPool.size(); i++) {
-            Block block = blockPool.get(i);
-            if (block.active && block.bitmap != null) {
-                Rect r = new Rect(block.x, block.y,
-                        block.x + block.bitmap.getWidth(), block.y + block.bitmap.getHeight());
-                if (r.contains((int) tx, (int) ty)) {
-                    block.active = false;
-                    coins++;
+    private void handleDrawingInput(int action, float x, float y) {
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+                currentStroke.clear();
+                currentStroke.add(new TrailPoint(x, y));
+                drawingFailure = false;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                currentStroke.add(new TrailPoint(x, y));
+                break;
+            case MotionEvent.ACTION_UP:
+                allStrokes.add(new ArrayList<>(currentStroke));
+                checkPattern();
+                currentStroke.clear();
+                break;
+        }
+    }
+
+    private void checkPattern() {
+        if (targetFence == null) return;
+
+        boolean success = false;
+        switch (targetFence.expectedPattern) {
+            case CIRCLE:
+                success = isCircle(allStrokes.get(allStrokes.size() - 1));
+                break;
+            case LINE:
+                success = isHorizontalLine(allStrokes.get(allStrokes.size() - 1));
+                break;
+            case CROSS:
+                if (allStrokes.size() >= 2) {
+                    success = isCross(allStrokes.get(allStrokes.size() - 2), allStrokes.get(allStrokes.size() - 1));
                 }
+                break;
+        }
+
+        if (success) {
+            targetFence.breakFence();
+            drawingMode = false;
+            targetFence = null;
+            allStrokes.clear();
+        } else {
+            // For circle and line, if failed on one stroke, it's a failure.
+            // For cross, we might need to wait for the second stroke.
+            if (targetFence.expectedPattern != Fence.Pattern.CROSS || allStrokes.size() >= 2) {
+                drawingFailure = true;
+                allStrokes.clear();
             }
         }
+    }
+
+    private boolean isCircle(List<TrailPoint> points) {
+        if (points.size() < 10) return false;
+        TrailPoint start = points.get(0);
+        TrailPoint end = points.get(points.size() - 1);
+        float dist = (float) Math.hypot(start.x - end.x, start.y - end.y);
+        
+        // End near start
+        if (dist > 200) return false;
+
+        float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+        float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+        for (TrailPoint p : points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        
+        float width = maxX - minX;
+        float height = maxY - minY;
+        
+        // Significant size
+        if (width < 100 || height < 100) return false;
+        
+        // Aspect ratio
+        float ratio = width / height;
+        return ratio > 0.5f && ratio < 2.0f;
+    }
+
+    private boolean isHorizontalLine(List<TrailPoint> points) {
+        if (points.size() < 5) return false;
+        float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+        float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+        for (TrailPoint p : points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        float width = maxX - minX;
+        float height = maxY - minY;
+        
+        return width > 200 && height < 100;
+    }
+
+    private boolean isCross(List<TrailPoint> s1, List<TrailPoint> s2) {
+        if (s1.size() < 5 || s2.size() < 5) return false;
+        
+        // Simple intersection check of bounding boxes first
+        Rect r1 = getBoundingBox(s1);
+        Rect r2 = getBoundingBox(s2);
+        
+        if (!Rect.intersects(r1, r2)) return false;
+        
+        // Check if both are somewhat "diagonal" or just "straight" lines
+        // For simplicity, if they intersect and have significant size, we call it a cross
+        return r1.width() > 100 && r1.height() > 100 && r2.width() > 100 && r2.height() > 100;
+    }
+
+    private Rect getBoundingBox(List<TrailPoint> points) {
+        float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+        float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+        for (TrailPoint p : points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        return new Rect((int)minX, (int)minY, (int)maxX, (int)maxY);
     }
 
     public HUD getHud() { return hud; }
@@ -335,13 +496,26 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             }
 
             checkBlockCollisions();
+            checkFenceCollisions();
             checkEnemyCollisions();
+        }
+
+        // Deactivate drawing mode if target is gone or broken
+        if (drawingMode && targetFence != null) {
+            if (!targetFence.active || targetFence.broken || targetFence.x + TILE_SIZE < player.getX()) {
+                drawingMode = false;
+                targetFence = null;
+                allStrokes.clear();
+            }
         }
 
         nextSpawnTick--;
         if (nextSpawnTick <= 0) {
-            if (random.nextBoolean()) {
+            int spawnType = random.nextInt(3);
+            if (spawnType == 0) {
                 spawnBlock();
+            } else if (spawnType == 1) {
+                spawnFence();
             } else {
                 spawnEnemy();
             }
@@ -352,16 +526,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             blockPool.get(i).update(gameSpeed);
         }
 
-        for (int i = 0; i < enemyPool.size(); i++) {
-            enemyPool.get(i).update(gameSpeed);
+        for (int i = 0; i < fencePool.size(); i++) {
+            fencePool.get(i).update(gameSpeed);
         }
 
-        long now = System.currentTimeMillis();
-        Iterator<TrailPoint> it = trailPoints.iterator();
-        while (it.hasNext()) {
-            if (now - it.next().timestamp > TRAIL_LIFETIME) {
-                it.remove();
-            }
+        for (int i = 0; i < enemyPool.size(); i++) {
+            enemyPool.get(i).update(gameSpeed);
         }
     }
 
@@ -379,6 +549,18 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
                 int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
                 block.spawn(randomBitmap, screenWidth, blockY);
+                return;
+            }
+        }
+    }
+
+    private void spawnFence() {
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (!fence.active) {
+                int fenceY = screenHeight - TILE_SIZE - fenceBitmap.getHeight();
+                Fence.Pattern pattern = Fence.Pattern.values()[random.nextInt(Fence.Pattern.values().length)];
+                fence.spawn(fenceBitmap, fenceBrokenBitmap, screenWidth, fenceY, pattern);
                 return;
             }
         }
@@ -424,6 +606,36 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
     }
 
+    private void checkFenceCollisions() {
+        Rect playerRect = player.getRect();
+
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (!fence.active || fence.broken) {
+                continue;
+            }
+
+            Rect fenceRect = fence.getRect();
+            
+            // Activate drawing mode if approaching
+            if (playerRect.right < fenceRect.left && fenceRect.left - playerRect.right < 600) {
+                if (!drawingMode) {
+                    startDrawingMode(fence);
+                }
+            }
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, fenceRect);
+            if (side == CollisionManager.Side.LEFT || side == CollisionManager.Side.RIGHT) {
+                loseLife();
+                fence.active = false;
+                drawingMode = false;
+            } else if (side == CollisionManager.Side.TOP) {
+                player.setY(fenceRect.top - playerRect.height());
+                player.setVy(0);
+            }
+        }
+    }
+
     private void checkEnemyCollisions() {
         Rect playerRect = player.getRect();
 
@@ -454,6 +666,14 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                     break;
             }
         }
+    }
+
+    private void startDrawingMode(Fence fence) {
+        drawingMode = true;
+        targetFence = fence;
+        allStrokes.clear();
+        currentStroke.clear();
+        drawingFailure = false;
     }
 
     private void loseLife() {
