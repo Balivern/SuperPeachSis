@@ -183,6 +183,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             if (player.getY() > groundY) {
                 player.setY(groundY);
                 player.setVy(0);
+                if (player.getState() == Player.State.JUMPING) {
+                    player.setState(Player.State.RUNNING);
+                }
             }
         }
 
@@ -210,5 +213,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     public Camera getCamera() {
         return camera;
+    }
+
+    public void triggerJump() {
+        if (player != null) {
+            player.jump();
+        }
     }
 }
