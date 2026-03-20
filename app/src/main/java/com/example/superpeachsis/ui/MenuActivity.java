@@ -1,4 +1,4 @@
-package com.example.superpeachsis;
+package com.example.superpeachsis.ui;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -18,6 +18,8 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+
+import com.example.superpeachsis.MainActivity;
 
 import java.io.IOException;
 import java.io.InputStream;

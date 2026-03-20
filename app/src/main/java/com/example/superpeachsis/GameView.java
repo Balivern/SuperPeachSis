@@ -4,9 +4,12 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import com.example.superpeachsis.utils.Camera;
+import com.example.superpeachsis.domain.model.Player;
 import com.example.superpeachsis.domain.model.Block;
 import com.example.superpeachsis.utils.SpriteManager;
 
@@ -18,15 +21,19 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     private GameThread thread;
     private SpriteManager spriteManager;
+    private Camera camera;
+    private Player player;
 
     private List<Bitmap> walkFrames;
     private Bitmap idleFrame;
     private Bitmap backgroundBitmap;
+    private Bitmap groundTile;
 
-    private int frameIndex = 0;
-    private int frameTick = 0;
-    private static final int TICKS_PER_FRAME = 12;
+    private static final int TILE_SIZE = 64;
+    private static final float PARALLAX_FACTOR = 0.3f;
 
+    private int screenWidth;
+    private int screenHeight;
     private int playerX = 200;
     private int playerY = 400;
     private String[] backgroundFiles = {
@@ -54,12 +61,17 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         super(context);
         getHolder().addCallback(this);
         spriteManager = SpriteManager.getInstance(context);
+        camera = new Camera(3f);
         thread = new GameThread(getHolder(), this);
         setFocusable(true);
         loadSprites();
+        // Initialize player position. Y will be updated once screenHeight is known.
+        player = new Player(200, 400, spriteManager);
     }
 
     private void loadSprites() {
+        backgroundBitmap = spriteManager.getBackground("background_color_trees");
+        groundTile = spriteManager.getTile("terrain_grass_block_top");
         walkFrames = spriteManager.getCharacterFrames("pink", "walk_a", "walk_b");
         idleFrame = spriteManager.loadBitmap("characters/character_pink_idle.png");
 
@@ -81,12 +93,22 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
+        screenWidth = getWidth();
+        screenHeight = getHeight();
+
+        // Adjust player Y to be on the ground
+        if (player != null) {
+            player.setY(screenHeight - TILE_SIZE - 64); // Assuming 64 is player height approximately
+        }
+
         thread.setRunning(true);
         thread.start();
     }
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        screenWidth = width;
+        screenHeight = height;
         if (backgroundBitmap != null) {
             // Redimensionner le fond une seule fois pour toute la partie
             backgroundBitmap = Bitmap.createScaledBitmap(backgroundBitmap, width, height, true);
@@ -115,13 +137,34 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
 
         canvas.drawColor(Color.parseColor("#5C94FC"));
+        drawBackground(canvas);
+        drawGround(canvas);
+        drawPlayer(canvas);
+    }
         backgroundBitmap = spriteManager.loadBitmap("backgrounds/" + randomBgFile);
 
-        if (backgroundBitmap != null) {
-            Bitmap bg = Bitmap.createScaledBitmap(backgroundBitmap, getWidth(), getHeight(), true);
-            canvas.drawBitmap(bg, 0, 0, null);
+    private void drawBackground(Canvas canvas) {
+        if (backgroundBitmap == null) {
+            return;
         }
+        float parallaxX = -(camera.getX() * PARALLAX_FACTOR) % screenWidth;
+        Rect dst = new Rect(0, 0, screenWidth, screenHeight);
 
+        canvas.save();
+        canvas.translate(parallaxX, 0);
+        canvas.drawBitmap(backgroundBitmap, null, dst, null);
+        canvas.translate(screenWidth, 0);
+        canvas.drawBitmap(backgroundBitmap, null, dst, null);
+        canvas.restore();
+    }
+
+    private void drawGround(Canvas canvas) {
+        if (groundTile == null) {
+            return;
+        }
+        int groundY = screenHeight - TILE_SIZE;
+        float offsetX = -(camera.getX() % TILE_SIZE);
+        int tilesNeeded = (screenWidth / TILE_SIZE) + 2;
         Bitmap currentFrame = getCurrentFrame();
         if (currentFrame != null) {
             canvas.drawBitmap(currentFrame, playerX, playerY, null);
@@ -134,19 +177,31 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
-    private Bitmap getCurrentFrame() {
-        if (walkFrames != null && !walkFrames.isEmpty()) {
-            return walkFrames.get(frameIndex);
+        for (int i = 0; i < tilesNeeded; i++) {
+            float tileX = offsetX + (i * TILE_SIZE);
+            canvas.drawBitmap(groundTile, null,
+                    new Rect((int) tileX, groundY, (int) tileX + TILE_SIZE, groundY + TILE_SIZE),
+                    null);
         }
-        return idleFrame;
+    }
+
+    private void drawPlayer(Canvas canvas) {
+        if (player != null) {
+            player.draw(canvas);
+        }
     }
 
     public void update() {
-        frameTick++;
-        if (frameTick >= TICKS_PER_FRAME) {
-            frameTick = 0;
-            if (walkFrames != null && !walkFrames.isEmpty()) {
-                frameIndex = (frameIndex + 1) % walkFrames.size();
+        camera.update();
+
+        if (player != null) {
+            player.update();
+
+            // Ground collision (simple for now)
+            int groundY = screenHeight - TILE_SIZE - 64; // assuming player height 64
+            if (player.getY() > groundY) {
+                player.setY(groundY);
+                player.setVy(0);
             }
         }
 
@@ -173,5 +228,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
                 break; // On n'en active qu'un seul à la fois
             }
         }
+    }
+
+    public Camera getCamera() {
+        return camera;
     }
 }
