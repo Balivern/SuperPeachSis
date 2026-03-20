@@ -1,12 +1,17 @@
 package com.example.superpeachsis;
 
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+
+import com.example.superpeachsis.domain.service.HUD;
+import com.example.superpeachsis.ui.MenuActivity;
 
 import com.example.superpeachsis.utils.Camera;
 import com.example.superpeachsis.domain.model.Player;
@@ -47,6 +52,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             "background_color_mushrooms"
     };
 
+    private HUD hud;
+
     private List<Block> blockPool = new ArrayList<>();
     private List<Bitmap> blockBitmaps = new ArrayList<>();
     private Random random = new Random();
@@ -60,6 +67,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         spriteManager = SpriteManager.getInstance(context);
         camera = new Camera(3f);
         thread = new GameThread(getHolder(), this);
+        hud = new HUD(spriteManager);
+        hud.setListener(() -> {
+            Context ctx = getContext();
+            Intent intent = new Intent(ctx, MenuActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            ctx.startActivity(intent);
+        });
         setFocusable(true);
         loadSprites();
         player = new Player(200, 400, spriteManager);
@@ -90,6 +104,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             player.setY(screenHeight - TILE_SIZE - PLAYER_HEIGHT);
         }
 
+        thread = new GameThread(getHolder(), this);
         thread.setRunning(true);
         thread.start();
     }
@@ -126,6 +141,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         drawGround(canvas);
         drawBlocks(canvas);
         drawPlayer(canvas);
+        hud.draw(canvas, screenWidth, screenHeight);
     }
 
     private void drawBackground(Canvas canvas) {
@@ -173,8 +189,22 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_UP) {
+            hud.onTouch(event.getX(), event.getY());
+        }
+        return true;
+    }
+
+    public HUD getHud() { return hud; }
+
     public void update() {
+        hud.update();
+        if (hud.isPaused()) return;
+
         camera.update();
+        hud.setDistance((int) (camera.getX() / 10));
 
         if (player != null) {
             player.update();
