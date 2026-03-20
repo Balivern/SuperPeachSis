@@ -45,22 +45,18 @@ public class Player {
     }
 
     public void update() {
-        // Apply gravity
         vy += GRAVITY;
         if (vy > MAX_VY) {
             vy = MAX_VY;
         }
 
-        // Update position
         y += vy;
 
-        // Basic floor to prevent falling forever until collisions are implemented
         if (y > 800) {
             y = 800;
             vy = 0;
         }
 
-        // Update animation
         if (state == State.RUNNING) {
             long currentTime = System.currentTimeMillis();
             if (currentTime - lastFrameTime >= FRAME_DURATION_MS) {
