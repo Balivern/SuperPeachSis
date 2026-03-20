@@ -49,9 +49,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private static final int PLAYER_HEIGHT = 128;
     private static final float PARALLAX_FACTOR = 0.3f;
     private static final int POOL_SIZE = 30;
-    private static final int BASE_GAME_SPEED = 6;
-    private static final int ENEMY_POOL_SIZE = 5;
+    private static final int BASE_GAME_SPEED = 10;
+    private static final int ENEMY_POOL_SIZE = 10;
     private static final long TRAIL_LIFETIME = 300;
+    private static final int MIN_SPAWN_DELAY = 20;
+    private static final int BASE_SPAWN_DELAY = 50;
+    private static final int SPAWN_RANGE = 60;
 
     private int screenWidth;
     private int screenHeight;
@@ -77,13 +80,15 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private final List<Bitmap> sawFrames = new ArrayList<>();
     private Bitmap sawDeathBitmap;
     private final Random random = new Random();
-    private int nextSpawnTick = 60;
+    private int nextSpawnTick = 30;
     private int lives = 3;
     private int coins = 0;
     private boolean gameOver = false;
 
     private final Rect bgRect = new Rect();
     private final Rect tileRect = new Rect();
+    private final Rect enemyRect = new Rect();
+    private final Rect touchRect = new Rect();
 
     private Paint trailPaint;
     private final List<TrailPoint> trailPoints = new ArrayList<>();
@@ -104,7 +109,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         spriteManager = SpriteManager.getInstance(context);
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
-        camera = new Camera(10f);
+        camera = new Camera(5f);
         thread = new GameThread(getHolder(), this);
         hud = new HUD(spriteManager);
         hud.setListener(() -> {
@@ -297,9 +302,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         for (int i = 0; i < blockPool.size(); i++) {
             Block block = blockPool.get(i);
             if (block.active && block.bitmap != null) {
-                Rect r = new Rect(block.x, block.y,
+                touchRect.set(block.x, block.y,
                         block.x + block.bitmap.getWidth(), block.y + block.bitmap.getHeight());
-                if (r.contains((int) tx, (int) ty)) {
+                if (touchRect.contains((int) tx, (int) ty)) {
                     block.active = false;
                     coins++;
                 }
@@ -340,12 +345,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
         nextSpawnTick--;
         if (nextSpawnTick <= 0) {
-            if (random.nextBoolean()) {
-                spawnBlock();
-            } else {
-                spawnEnemy();
-            }
-            nextSpawnTick = 60 + random.nextInt(120);
+            spawnObstacle();
+            int delay = Math.max(MIN_SPAWN_DELAY, BASE_SPAWN_DELAY - (tickCount / 300));
+            nextSpawnTick = delay + random.nextInt(Math.max(10, SPAWN_RANGE - (tickCount / 400)));
         }
 
         for (int i = 0; i < blockPool.size(); i++) {
@@ -366,9 +368,26 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void updateDifficulty() {
-        if (tickCount % 600 == 0) {
-            gameSpeed = Math.min(BASE_GAME_SPEED + (tickCount / 600), 14);
-            camera.setSpeed(3f + (tickCount / 600f) * 0.5f);
+        if (tickCount % 300 == 0 && tickCount > 0) {
+            int level = tickCount / 300;
+            gameSpeed = Math.min(BASE_GAME_SPEED + level * 2, 22);
+            camera.setSpeed(5f + level * 0.8f);
+        }
+    }
+
+    private void spawnObstacle() {
+        int roll = random.nextInt(100);
+
+        if (roll < 40) {
+            spawnBlock();
+        } else if (roll < 70) {
+            spawnEnemy();
+        } else if (roll < 85) {
+            spawnBlock();
+            spawnEnemy();
+        } else {
+            spawnBlock();
+            spawnBlockOffset(40);
         }
     }
 
@@ -379,6 +398,18 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
                 int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
                 block.spawn(randomBitmap, screenWidth, blockY);
+                return;
+            }
+        }
+    }
+
+    private void spawnBlockOffset(int offset) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (!block.active) {
+                Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
+                int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
+                block.spawn(randomBitmap, screenWidth + offset, blockY);
                 return;
             }
         }
@@ -433,9 +464,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 continue;
             }
 
-            Rect enemyRect = new Rect(enemy.x, enemy.y,
-                    enemy.x + enemy.getCurrentBitmap().getWidth(),
-                    enemy.y + enemy.getCurrentBitmap().getHeight());
+            Bitmap enemyBmp = enemy.getCurrentBitmap();
+            enemyRect.set(enemy.x, enemy.y,
+                    enemy.x + enemyBmp.getWidth(), enemy.y + enemyBmp.getHeight());
 
             CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, enemyRect);
 
@@ -468,14 +499,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private void launchGameOver() {
         post(() -> {
             Context ctx = getContext();
+            if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
             Intent intent = new Intent(ctx, GameOverActivity.class);
             intent.putExtra(GameOverActivity.EXTRA_DISTANCE, (int) (camera.getX() / 10));
             intent.putExtra(GameOverActivity.EXTRA_COINS, coins);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
             ctx.startActivity(intent);
-            if (ctx instanceof Activity) {
-                ((Activity) ctx).finish();
-            }
         });
     }
 
