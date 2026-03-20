@@ -1,10 +1,7 @@
 package com.example.superpeachsis.ui;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -19,12 +16,13 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 
-import com.example.superpeachsis.MainActivity;
+import com.example.superpeachsis.domain.service.ScoreManager;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 
-public class MenuActivity extends Activity {
+public class ScoreBoardActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -34,52 +32,38 @@ public class MenuActivity extends Activity {
                 WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN
         );
-        setContentView(new MenuView(this));
+        setContentView(new ScoreBoardView(this));
     }
 
-    class MenuView extends View {
+    class ScoreBoardView extends View {
 
         private Bitmap bgBitmap;
-        private Bitmap blockJouer;
-        private Bitmap blockScores;
+        private Bitmap blockMenu;
         private Bitmap characterIdle;
+        private Bitmap coinBitmap;
 
         private Paint titlePaint;
         private Paint titleOutlinePaint;
+        private Paint scorePaint;
         private Paint btnTextPaint;
+        private Paint tablePaint;
 
-        private RectF btnJouer;
-        private RectF btnScores;
+        private RectF btnMenu;
+        private List<Integer> topScores;
 
-        private float bounceOffset = 0f;
-        private float bounceVelocity = BOUNCE_SPEED;
-        private static final float BOUNCE_SPEED = 2.5f;
-        private static final float BOUNCE_MAX   = 18f;
-
-        private final Runnable animRunnable = new Runnable() {
-            @Override
-            public void run() {
-                bounceOffset += bounceVelocity;
-                if (bounceOffset >= BOUNCE_MAX)  bounceVelocity = -BOUNCE_SPEED;
-                if (bounceOffset <= 0f)          bounceVelocity =  BOUNCE_SPEED;
-                invalidate();
-                postDelayed(this, 16);
-            }
-        };
-
-        public MenuView(Context context) {
+        public ScoreBoardView(Context context) {
             super(context);
+            topScores = new ScoreManager(context).getTopScores();
             loadAssets();
             setupPaints();
-            post(animRunnable);
         }
 
         private void loadAssets() {
             AssetManager am = getContext().getAssets();
-            bgBitmap      = loadBitmap(am, "backgrounds/background_color_trees.png");
-            blockJouer    = loadBitmap(am, "tiles/block_exclamation.png");
-            blockScores   = loadBitmap(am, "tiles/block_coin.png");
+            bgBitmap      = loadBitmap(am, "backgrounds/background_color_desert.png");
+            blockMenu     = loadBitmap(am, "tiles/block_coin.png");
             characterIdle = loadBitmap(am, "characters/character_pink_idle.png");
+            coinBitmap    = loadBitmap(am, "tiles/block_coin.png");
         }
 
         private Bitmap loadBitmap(AssetManager am, String path) {
@@ -99,16 +83,26 @@ public class MenuActivity extends Activity {
             titlePaint.setShadowLayer(8f, 4f, 4f, Color.parseColor("#80000000"));
 
             titleOutlinePaint = new Paint(titlePaint);
-            titleOutlinePaint.setColor(Color.parseColor("#7B3F00"));
+            titleOutlinePaint.setColor(Color.parseColor("#D2691E"));
             titleOutlinePaint.setStyle(Paint.Style.STROKE);
             titleOutlinePaint.setStrokeWidth(8f);
             titleOutlinePaint.clearShadowLayer();
+
+            scorePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            scorePaint.setColor(Color.WHITE);
+            scorePaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            scorePaint.setTextAlign(Paint.Align.LEFT);
+            scorePaint.setShadowLayer(4f, 2f, 2f, Color.BLACK);
 
             btnTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             btnTextPaint.setColor(Color.WHITE);
             btnTextPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
             btnTextPaint.setTextAlign(Paint.Align.CENTER);
             btnTextPaint.setShadowLayer(4f, 2f, 2f, Color.BLACK);
+
+            tablePaint = new Paint();
+            tablePaint.setColor(Color.parseColor("#90000000"));
+            tablePaint.setStyle(Paint.Style.FILL);
         }
 
         @Override
@@ -119,38 +113,69 @@ public class MenuActivity extends Activity {
             if (bgBitmap != null) {
                 canvas.drawBitmap(bgBitmap, null, new RectF(0, 0, w, h), null);
             } else {
-                canvas.drawColor(Color.parseColor("#5C94FC"));
+                canvas.drawColor(Color.parseColor("#F4A460"));
             }
 
-            float titleSize = h * 0.085f;
+            float titleSize = h * 0.10f;
             titlePaint.setTextSize(titleSize);
             titleOutlinePaint.setTextSize(titleSize);
-            float titleY = h * 0.22f;
+            float titleY = h * 0.15f;
+            canvas.drawText("MEILLEURS SCORES", w / 2f, titleY, titleOutlinePaint);
+            canvas.drawText("MEILLEURS SCORES", w / 2f, titleY, titlePaint);
 
-            canvas.drawText("SuperPeachSis", w / 2f, titleY, titleOutlinePaint);
-            canvas.drawText("SuperPeachSis", w / 2f, titleY, titlePaint);
+            // Table Background
+            float tableW = w * 0.8f;
+            float tableH = h * 0.5f;
+            float tableX = (w - tableW) / 2f;
+            float tableY_pos = h * 0.25f;
+            RectF tableRect = new RectF(tableX, tableY_pos, tableX + tableW, tableY_pos + tableH);
+            canvas.drawRoundRect(tableRect, 20f, 20f, tablePaint);
 
-            float btnW = w * 0.55f;
-            float btnH = h * 0.13f;
-            float btnCx = w / 2f;
-            btnTextPaint.setTextSize(btnH * 0.42f);
+            // Table Header
+            scorePaint.setTextSize(h * 0.05f);
+            float headerY = tableY_pos + h * 0.08f;
+            canvas.drawText("RANG", tableX + w * 0.05f, headerY, scorePaint);
+            canvas.drawText("SCORE", tableX + w * 0.45f, headerY, scorePaint);
 
-            btnJouer  = new RectF(btnCx - btnW / 2f, h * 0.40f, btnCx + btnW / 2f, h * 0.40f + btnH);
-            btnScores = new RectF(btnCx - btnW / 2f, h * 0.58f, btnCx + btnW / 2f, h * 0.58f + btnH);
+            // Divider line
+            Paint linePaint = new Paint();
+            linePaint.setColor(Color.WHITE);
+            linePaint.setStrokeWidth(4f);
+            canvas.drawLine(tableX + w * 0.02f, headerY + 10, tableX + tableW - w * 0.02f, headerY + 10, linePaint);
 
-            drawBlockButton(canvas, blockJouer,  btnJouer,  "JOUER");
-            drawBlockButton(canvas, blockScores, btnScores, "SCORES");
+            // Scores
+            float rowHeight = h * 0.08f;
+            for (int i = 0; i < 5; i++) {
+                float rowY = headerY + (i + 1) * rowHeight;
+                String rank = (i + 1) + ".";
+                String scoreStr = (i < topScores.size()) ? String.valueOf(topScores.get(i)) : "---";
+                
+                canvas.drawText(rank, tableX + w * 0.05f, rowY, scorePaint);
+                canvas.drawText(scoreStr, tableX + w * 0.45f, rowY, scorePaint);
+                
+                if (i < topScores.size() && coinBitmap != null) {
+                    float coinSize = h * 0.04f;
+                    canvas.drawBitmap(coinBitmap, null, new RectF(
+                            tableX + w * 0.38f, rowY - coinSize * 0.8f,
+                            tableX + w * 0.38f + coinSize, rowY + coinSize * 0.2f
+                    ), null);
+                }
+            }
 
-            float charH     = h * 0.18f;
-            float charCx    = w * 0.15f;
-            float charBottom = h * 0.52f - bounceOffset;
+            // Back Button
+            float btnW  = w * 0.35f;
+            float btnH  = h * 0.10f;
+            float btnY  = h * 0.82f;
+            btnTextPaint.setTextSize(btnH * 0.45f);
+            btnMenu = new RectF(w / 2f - btnW / 2f, btnY, w / 2f + btnW / 2f, btnY + btnH);
+            drawBlockButton(canvas, blockMenu, btnMenu, "RETOUR");
 
+            // Decorative Character
+            float charH = h * 0.15f;
             if (characterIdle != null) {
                 canvas.drawBitmap(characterIdle, null, new RectF(
-                        charCx - charH / 2f,
-                        charBottom - charH,
-                        charCx + charH / 2f,
-                        charBottom
+                        w * 0.8f, h * 0.75f,
+                        w * 0.8f + charH, h * 0.75f + charH
                 ), null);
             }
         }
@@ -180,19 +205,11 @@ public class MenuActivity extends Activity {
                 float x = event.getX();
                 float y = event.getY();
 
-                if (btnJouer != null && btnJouer.contains(x, y)) {
-                    startActivity(new Intent(MenuActivity.this, MainActivity.class));
-                } else if (btnScores != null && btnScores.contains(x, y)) {
-                    startActivity(new Intent(MenuActivity.this, ScoreBoardActivity.class));
+                if (btnMenu != null && btnMenu.contains(x, y)) {
+                    finish();
                 }
             }
             return true;
-        }
-
-        @Override
-        protected void onDetachedFromWindow() {
-            super.onDetachedFromWindow();
-            removeCallbacks(animRunnable);
         }
     }
 }
