@@ -3,11 +3,14 @@ package com.example.superpeachsis;
 import android.graphics.Canvas;
 import android.view.SurfaceHolder;
 
-public class GameThread extends Thread{
-    private SurfaceHolder surfaceHolder;
-    private GameView gameView;
+public class GameThread extends Thread {
+
+    private static final int TARGET_FPS = 60;
+    private static final long FRAME_DURATION = 1000 / TARGET_FPS;
+
+    private final SurfaceHolder surfaceHolder;
+    private final GameView gameView;
     private boolean running;
-    private Canvas canvas;
 
     public GameThread(SurfaceHolder surfaceHolder, GameView gameView) {
         super();
@@ -17,22 +20,40 @@ public class GameThread extends Thread{
 
     @Override
     public void run() {
+        long startTime;
+        long elapsed;
+        long sleepTime;
+
         while (running) {
-            canvas = null;
+            startTime = System.currentTimeMillis();
+            Canvas canvas = null;
+
             try {
-                canvas = this.surfaceHolder.lockCanvas();
-                synchronized(surfaceHolder) {
-                    this.gameView.update();
-                    this.gameView.draw(canvas);
+                canvas = surfaceHolder.lockCanvas();
+                if (canvas != null) {
+                    synchronized (surfaceHolder) {
+                        gameView.update();
+                        gameView.draw(canvas);
+                    }
                 }
-            } catch (Exception e) {}
-            finally {
+            } finally {
                 if (canvas != null) {
                     try {
                         surfaceHolder.unlockCanvasAndPost(canvas);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
+                }
+            }
+
+            elapsed = System.currentTimeMillis() - startTime;
+            sleepTime = FRAME_DURATION - elapsed;
+
+            if (sleepTime > 0) {
+                try {
+                    Thread.sleep(sleepTime);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
             }
         }
