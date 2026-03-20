@@ -21,14 +21,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private Camera camera;
     private Player player;
 
-    private List<Bitmap> walkFrames;
-    private Bitmap idleFrame;
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
 
-    private int frameIndex = 0;
-    private int frameTick = 0;
-    private static final int TICKS_PER_FRAME = 12;
     private static final int TILE_SIZE = 64;
     private static final float PARALLAX_FACTOR = 0.3f;
 
@@ -43,12 +38,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         thread = new GameThread(getHolder(), this);
         setFocusable(true);
         loadSprites();
+        // Initialize player position. Y will be updated once screenHeight is known.
         player = new Player(200, 400, spriteManager);
     }
 
     private void loadSprites() {
-        walkFrames = spriteManager.getCharacterFrames("pink", "walk_a", "walk_b");
-        idleFrame = spriteManager.loadBitmap("characters/character_pink_idle.png");
         backgroundBitmap = spriteManager.getBackground("background_color_trees");
         groundTile = spriteManager.getTile("terrain_grass_block_top");
     }
@@ -57,6 +51,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     public void surfaceCreated(SurfaceHolder holder) {
         screenWidth = getWidth();
         screenHeight = getHeight();
+
+        // Adjust player Y to be on the ground
+        if (player != null) {
+            player.setY(screenHeight - TILE_SIZE - 64); // Assuming 64 is player height approximately
+        }
+
         thread.setRunning(true);
         thread.start();
     }
@@ -126,35 +126,23 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     }
 
     private void drawPlayer(Canvas canvas) {
-        Bitmap currentFrame = getCurrentFrame();
-        if (currentFrame == null) {
-            return;
         if (player != null) {
             player.draw(canvas);
         }
-        int playerScreenX = screenWidth / 4;
-        int playerY = screenHeight - TILE_SIZE - currentFrame.getHeight();
-        canvas.drawBitmap(currentFrame, playerScreenX, playerY, null);
-    }
-
-    private Bitmap getCurrentFrame() {
-        if (walkFrames != null && !walkFrames.isEmpty()) {
-            return walkFrames.get(frameIndex);
-        }
-        return idleFrame;
     }
 
     public void update() {
         camera.update();
 
-        frameTick++;
-        if (frameTick >= TICKS_PER_FRAME) {
-            frameTick = 0;
-            if (walkFrames != null && !walkFrames.isEmpty()) {
-                frameIndex = (frameIndex + 1) % walkFrames.size();
-            }
         if (player != null) {
             player.update();
+
+            // Ground collision (simple for now)
+            int groundY = screenHeight - TILE_SIZE - 64; // assuming player height 64
+            if (player.getY() > groundY) {
+                player.setY(groundY);
+                player.setVy(0);
+            }
         }
     }
 

@@ -52,11 +52,6 @@ public class Player {
 
         y += vy;
 
-        if (y > 800) {
-            y = 800;
-            vy = 0;
-        }
-
         if (state == State.RUNNING) {
             long currentTime = System.currentTimeMillis();
             if (currentTime - lastFrameTime >= FRAME_DURATION_MS) {
