@@ -1,59 +1,890 @@
 package com.example.superpeachsis;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
-public class GameView extends SurfaceView implements SurfaceHolder.Callback {
+import com.example.superpeachsis.domain.model.Block;
+import com.example.superpeachsis.domain.model.Enemy;
+import com.example.superpeachsis.domain.model.Fence;
+import com.example.superpeachsis.domain.model.Player;
+import com.example.superpeachsis.domain.service.HUD;
+import com.example.superpeachsis.ui.GameOverActivity;
+import com.example.superpeachsis.ui.MenuActivity;
+import com.example.superpeachsis.utils.Camera;
+import com.example.superpeachsis.utils.CollisionManager;
+import com.example.superpeachsis.utils.SoundManager;
+import com.example.superpeachsis.utils.SpriteManager;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+public class GameView extends SurfaceView implements SurfaceHolder.Callback, SensorEventListener {
 
     private GameThread thread;
+    private SpriteManager spriteManager;
+    private Camera camera;
+    private Player player;
+    private volatile HUD hud;
 
-    private int x=0;
+    private SensorManager sensorManager;
+    private Sensor lightSensor;
+    private boolean isLightSensorCovered = false;
+
+    private Bitmap backgroundBitmap;
+    private Bitmap groundTile;
+
+    private static final float PARALLAX_FACTOR = 0.3f;
+    private static final int POOL_SIZE = 30;
+    private static final int BASE_GAME_SPEED = 10;
+    private static final int ENEMY_POOL_SIZE = 10;
+    private static final int MIN_SPAWN_DELAY = 20;
+    private static final int BASE_SPAWN_DELAY = 50;
+    private static final int SPAWN_RANGE = 60;
+
+    private int screenWidth;
+    private int screenHeight;
+    private int tileSize;
+    private int playerHeight;
+    private int blockSize;
+    private int fenceWidth;
+    private int fenceHeight;
+    private int enemySize;
+    private int gameSpeed = BASE_GAME_SPEED;
+    private int tickCount = 0;
+
+    private final String[] backgroundFiles = {
+            "background_clouds",
+            "background_solid_sky",
+            "background_fade_hills",
+            "background_fade_trees",
+            "background_color_hills",
+            "background_color_trees",
+            "background_fade_desert",
+            "background_color_desert",
+            "background_fade_mushrooms",
+            "background_color_mushrooms"
+    };
+
+    private final List<Block> blockPool = new ArrayList<>();
+    private final List<Bitmap> blockBitmaps = new ArrayList<>();
+    private final List<Fence> fencePool = new ArrayList<>();
+    private Bitmap fenceBitmap;
+    private Bitmap fenceBrokenBitmap;
+    private final List<Enemy> enemyPool = new ArrayList<>();
+
+    private boolean drawingMode = false;
+    private Fence targetFence = null;
+    private final List<TrailPoint> currentStroke = new ArrayList<>();
+    private final List<List<TrailPoint>> allStrokes = new ArrayList<>();
+    private Paint drawingPaint;
+    private Paint overlayPaint;
+    private boolean drawingFailure = false;
+
+    private final List<Bitmap> sawFrames = new ArrayList<>();
+    private Bitmap sawDeathBitmap;
+    private final Random random = new Random();
+    private int nextSpawnTick = 30;
+    private int lives = 3;
+    private int coins = 0;
+    private boolean gameOver = false;
+
+    private final Rect bgRect = new Rect();
+    private final Rect tileRect = new Rect();
+
+    private static class TrailPoint {
+        float x, y;
+        long timestamp;
+        TrailPoint(float x, float y) {
+            this.x = x;
+            this.y = y;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+
+    private SoundManager soundManager;
+    private boolean wasPaused = false;
+
+    private volatile boolean ready = false;
+    private volatile boolean isAbandoning = false;
+    private Paint loadingPaint;
 
     public GameView(Context context) {
         super(context);
         getHolder().addCallback(this);
+        spriteManager = SpriteManager.getInstance(context);
+        soundManager  = SoundManager.getInstance(context);
+        sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+        camera = new Camera(5f);
         thread = new GameThread(getHolder(), this);
         setFocusable(true);
+
+        loadingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        loadingPaint.setColor(Color.WHITE);
+        loadingPaint.setTextSize(48f);
+        loadingPaint.setTextAlign(Paint.Align.CENTER);
+
+        drawingPaint = new Paint();
+        drawingPaint.setColor(Color.WHITE);
+        drawingPaint.setStrokeWidth(12f);
+        drawingPaint.setStyle(Paint.Style.STROKE);
+        drawingPaint.setStrokeJoin(Paint.Join.ROUND);
+        drawingPaint.setStrokeCap(Paint.Cap.ROUND);
+        drawingPaint.setAntiAlias(true);
+
+        overlayPaint = new Paint();
+        overlayPaint.setColor(Color.BLACK);
+        overlayPaint.setAlpha(40);
+    }
+
+    private void loadSprites() {
+        String randomBg = backgroundFiles[random.nextInt(backgroundFiles.length)];
+        backgroundBitmap = spriteManager.getBackground(randomBg);
+        groundTile = spriteManager.getTile("terrain_grass_block_top");
+
+        blockBitmaps.add(spriteManager.loadBitmap("tiles/block_red.png"));
+        blockBitmaps.add(spriteManager.loadBitmap("tiles/block_blue.png"));
+        blockBitmaps.add(spriteManager.loadBitmap("tiles/block_green.png"));
+        blockBitmaps.add(spriteManager.loadBitmap("tiles/block_yellow.png"));
+
+        for (int i = 0; i < POOL_SIZE; i++) {
+            blockPool.add(new Block());
+        }
+
+        fenceBitmap = spriteManager.loadBitmap("tiles/fence.png");
+        fenceBrokenBitmap = spriteManager.loadBitmap("tiles/fence_broken.png");
+        for (int i = 0; i < 5; i++) {
+            fencePool.add(new Fence());
+        }
+
+        sawFrames.add(spriteManager.loadBitmap("enemies/saw_a.png"));
+        sawFrames.add(spriteManager.loadBitmap("enemies/saw_b.png"));
+        sawDeathBitmap = spriteManager.loadBitmap("enemies/saw_rest.png");
+
+        for (int i = 0; i < ENEMY_POOL_SIZE; i++) {
+            enemyPool.add(new Enemy());
+        }
     }
 
     @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width,
-                               int height) {
-    }
-    @Override
     public void surfaceCreated(SurfaceHolder holder) {
+        screenWidth = getWidth();
+        screenHeight = getHeight();
+        computeSizes();
+
+        if (lightSensor != null) {
+            sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_GAME);
+        }
+
+        if (thread.getState() != Thread.State.NEW) {
+            thread = new GameThread(getHolder(), this);
+        }
         thread.setRunning(true);
         thread.start();
+
+        new Thread(() -> {
+            loadSprites();
+            hud = new HUD(spriteManager);
+            hud.setListener(() -> {
+                soundManager.stopMusic();
+                isAbandoning = true;
+                post(() -> {
+                    invalidate();
+                    postDelayed(() -> {
+                        Context ctx = getContext();
+                        if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
+                        Intent intent = new Intent(ctx, MenuActivity.class);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                        ctx.startActivity(intent);
+                        if (ctx instanceof Activity) {
+                            ((Activity) ctx).overridePendingTransition(0, 0);
+                        }
+                    }, 200);
+                });
+            });
+            player = new Player(screenWidth / 4f, screenHeight - tileSize - playerHeight, spriteManager);
+            player.setDrawHeight(playerHeight);
+            ready = true;
+            soundManager.playMusic(SoundManager.MUSIC_GAME);
+        }).start();
     }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        screenWidth = width;
+        screenHeight = height;
+        computeSizes();
+        if (player != null) {
+            player.setDrawHeight(playerHeight);
+        }
+    }
+
+    private void computeSizes() {
+        tileSize = (int) (screenHeight * 0.08f);
+        playerHeight = (int) (screenHeight * 0.18f);
+        blockSize = (int) (screenHeight * 0.12f);
+        fenceWidth = (int) (screenHeight * 0.08f);
+        fenceHeight = (int) (screenHeight * 0.20f);
+        enemySize = (int) (screenHeight * 0.12f);
+    }
+
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
-        boolean retry = true;
-        while (retry) {
-            try {
-                thread.setRunning(false);
-                thread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            retry = false;
-        }
+        thread.setRunning(false);
+        thread.interrupt();
+        try {
+            thread.join(1000);
+        } catch (InterruptedException ignored) {}
+        sensorManager.unregisterListener(this);
     }
 
     @Override
     public void draw(Canvas canvas) {
         super.draw(canvas);
-        if (canvas != null) {
-            canvas.drawColor(Color.WHITE);
-            Paint paint = new Paint();
-            paint.setColor(Color.rgb(250, 0, 0));
-            canvas.drawRect(x, 100, x+100, 200, paint);
+        if (canvas == null) {
+            return;
+        }
+
+        canvas.drawColor(Color.parseColor("#5C94FC"));
+
+        if (!ready || isAbandoning) {
+            canvas.drawColor(Color.BLACK);
+            canvas.drawText("Chargement...", screenWidth / 2f, screenHeight / 2f, loadingPaint);
+            return;
+        }
+
+        drawBackground(canvas);
+        drawGround(canvas);
+        drawBlocks(canvas);
+        drawFences(canvas);
+        drawEnemies(canvas);
+        drawPlayer(canvas);
+
+        if (drawingMode) {
+            drawDrawingOverlay(canvas);
+        }
+
+        if (hud != null) {
+            hud.draw(canvas, screenWidth, screenHeight);
         }
     }
+
+    private void drawDrawingOverlay(Canvas canvas) {
+        canvas.drawRect(0, 0, screenWidth, screenHeight, overlayPaint);
+
+        Paint hintPaint = new Paint();
+        hintPaint.setColor(Color.WHITE);
+        hintPaint.setTextSize(60);
+        hintPaint.setTextAlign(Paint.Align.CENTER);
+        if (targetFence != null) {
+            canvas.drawText("Dessinez : " + targetFence.expectedPattern.name(), screenWidth / 2f, 150, hintPaint);
+        }
+
+        drawingPaint.setColor(drawingFailure ? Color.RED : Color.WHITE);
+
+        drawStroke(canvas, currentStroke);
+
+        for (int i = 0; i < allStrokes.size(); i++) {
+            drawStroke(canvas, allStrokes.get(i));
+        }
+    }
+
+    private void drawStroke(Canvas canvas, List<TrailPoint> stroke) {
+        if (stroke.size() < 2) return;
+        for (int i = 0; i < stroke.size() - 1; i++) {
+            TrailPoint p1 = stroke.get(i);
+            TrailPoint p2 = stroke.get(i + 1);
+            canvas.drawLine(p1.x, p1.y, p2.x, p2.y, drawingPaint);
+        }
+    }
+
+    private void drawFences(Canvas canvas) {
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (fence.active && fence.bitmap != null) {
+                if (fence.broken && fence.deathAnimationTimer > 0 && (fence.deathAnimationTimer / 5) % 2 == 0) {
+                    continue;
+                }
+                canvas.drawBitmap(fence.bitmap, null, fence.getRect(), null);
+            }
+        }
+    }
+
+    private void drawBackground(Canvas canvas) {
+        if (backgroundBitmap == null) {
+            return;
+        }
+        float parallaxX = -(camera.getX() * PARALLAX_FACTOR) % screenWidth;
+        bgRect.set(0, 0, screenWidth, screenHeight);
+
+        canvas.save();
+        canvas.translate(parallaxX, 0);
+        canvas.drawBitmap(backgroundBitmap, null, bgRect, null);
+        canvas.translate(screenWidth, 0);
+        canvas.drawBitmap(backgroundBitmap, null, bgRect, null);
+        canvas.restore();
+    }
+
+    private void drawGround(Canvas canvas) {
+        if (groundTile == null) {
+            return;
+        }
+        int groundY = screenHeight - tileSize;
+        float offsetX = -(camera.getX() % tileSize);
+        int tilesNeeded = (screenWidth / tileSize) + 2;
+
+        for (int i = 0; i < tilesNeeded; i++) {
+            int tileX = (int) (offsetX + (i * tileSize));
+            tileRect.set(tileX, groundY, tileX + tileSize, groundY + tileSize);
+            canvas.drawBitmap(groundTile, null, tileRect, null);
+        }
+    }
+
+    private void drawBlocks(Canvas canvas) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.bitmap != null) {
+                canvas.drawBitmap(block.bitmap, null, block.getRect(), null);
+            }
+        }
+    }
+
+    private void drawEnemies(Canvas canvas) {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (enemy.active) {
+                if (enemy.isDead && enemy.deathAnimationTimer > 0 && (enemy.deathAnimationTimer / 5) % 2 == 0) {
+                    continue;
+                }
+                canvas.drawBitmap(enemy.getCurrentBitmap(), null, enemy.getRect(), null);
+            }
+        }
+    }
+
+    private void drawPlayer(Canvas canvas) {
+        if (player != null) {
+            player.draw(canvas);
+        }
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (!ready) return true;
+
+        int action = event.getAction();
+        float x = event.getX();
+        float y = event.getY();
+
+        if (drawingMode) {
+            handleDrawingInput(action, x, y);
+            return true;
+        }
+
+        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_DOWN) {
+            checkBlockDestruction(x, y);
+        }
+
+        if (action == MotionEvent.ACTION_UP) {
+            if (hud.onTouch(x, y)) {
+                // Check if abandonment happened by looking at the HUD state (if it had a listener)
+                // or just trust the hud returned true.
+                // In our case hud.onTouch(x,y) returns true if it handled the event.
+                // The HUD listener we set earlier already sets isAbandoning=true.
+                // But the UI might not invalidate immediately if we are in the middle of a loop.
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    private void checkBlockDestruction(float tx, float ty) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.bitmap != null) {
+                if (block.getRect().contains((int) tx, (int) ty)) {
+                    block.active = false;
+                    coins++;
+                }
+            }
+        }
+    }
+
+    private void handleDrawingInput(int action, float x, float y) {
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+                currentStroke.clear();
+                currentStroke.add(new TrailPoint(x, y));
+                drawingFailure = false;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                currentStroke.add(new TrailPoint(x, y));
+                break;
+            case MotionEvent.ACTION_UP:
+                allStrokes.add(new ArrayList<>(currentStroke));
+                checkPattern();
+                currentStroke.clear();
+                break;
+        }
+    }
+
+    private void checkPattern() {
+        if (targetFence == null) return;
+
+        boolean success = false;
+        switch (targetFence.expectedPattern) {
+            case CIRCLE:
+                success = isCircle(allStrokes.get(allStrokes.size() - 1));
+                break;
+            case LINE:
+                success = isHorizontalLine(allStrokes.get(allStrokes.size() - 1));
+                break;
+            case CROSS:
+                if (allStrokes.size() >= 2) {
+                    success = isCross(allStrokes.get(allStrokes.size() - 2), allStrokes.get(allStrokes.size() - 1));
+                }
+                break;
+        }
+
+        if (success) {
+            targetFence.breakFence();
+            drawingMode = false;
+            targetFence = null;
+            allStrokes.clear();
+        } else {
+            if (targetFence.expectedPattern != Fence.Pattern.CROSS || allStrokes.size() >= 2) {
+                drawingFailure = true;
+                allStrokes.clear();
+            }
+        }
+    }
+
+    private boolean isCircle(List<TrailPoint> points) {
+        if (points.size() < 10) return false;
+        TrailPoint start = points.get(0);
+        TrailPoint end = points.get(points.size() - 1);
+        float dist = (float) Math.hypot(start.x - end.x, start.y - end.y);
+
+        if (dist > 200) return false;
+
+        float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+        float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+        for (TrailPoint p : points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+
+        float width = maxX - minX;
+        float height = maxY - minY;
+
+        if (width < 100 || height < 100) return false;
+
+        float ratio = width / height;
+        return ratio > 0.5f && ratio < 2.0f;
+    }
+
+    private boolean isHorizontalLine(List<TrailPoint> points) {
+        if (points.size() < 5) return false;
+        float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+        float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+        for (TrailPoint p : points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        float width = maxX - minX;
+        float height = maxY - minY;
+
+        return width > 200 && height < 100;
+    }
+
+    private boolean isCross(List<TrailPoint> s1, List<TrailPoint> s2) {
+        if (s1.size() < 5 || s2.size() < 5) return false;
+
+        Rect r1 = getBoundingBox(s1);
+        Rect r2 = getBoundingBox(s2);
+
+        if (!Rect.intersects(r1, r2)) return false;
+
+        return r1.width() > 100 && r1.height() > 100 && r2.width() > 100 && r2.height() > 100;
+    }
+
+    private Rect getBoundingBox(List<TrailPoint> points) {
+        float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+        float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+        for (TrailPoint p : points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        return new Rect((int) minX, (int) minY, (int) maxX, (int) maxY);
+    }
+
+    public HUD getHud() { return hud; }
+
     public void update() {
-        x = (x + 1) % 300;
+        if (!ready || gameOver) {
+            return;
+        }
+
+        tickCount++;
+        updateDifficulty();
+        if (hud == null) return;
+        hud.update();
+        boolean isPaused = hud.isPaused();
+        if (isPaused && !wasPaused) soundManager.pauseMusic();
+        else if (!isPaused && wasPaused) soundManager.resumeMusic();
+        wasPaused = isPaused;
+        if (isPaused) return;
+
+        camera.update();
+        hud.setDistance((int) (camera.getX() / 10));
+
+        if (player != null) {
+            player.update();
+
+            int groundY = screenHeight - tileSize - playerHeight;
+            if (player.getY() >= groundY) {
+                player.setY(groundY);
+                player.setVy(0);
+                player.setOnGround(true);
+                if (player.getState() == Player.State.JUMPING) {
+                    player.setState(Player.State.RUNNING);
+                }
+            }
+
+            checkBlockCollisions();
+            checkFenceCollisions();
+            checkEnemyCollisions();
+        }
+
+        if (drawingMode && targetFence != null) {
+            if (!targetFence.active || targetFence.broken || targetFence.x + tileSize < player.getX()) {
+                drawingMode = false;
+                targetFence = null;
+                allStrokes.clear();
+            }
+        }
+
+        nextSpawnTick--;
+        if (nextSpawnTick <= 0) {
+            spawnObstacle();
+            int delay = Math.max(MIN_SPAWN_DELAY, BASE_SPAWN_DELAY - (tickCount / 300));
+            nextSpawnTick = delay + random.nextInt(Math.max(10, SPAWN_RANGE - (tickCount / 400)));
+        }
+
+        for (int i = 0; i < blockPool.size(); i++) {
+            blockPool.get(i).update(gameSpeed);
+        }
+
+        for (int i = 0; i < fencePool.size(); i++) {
+            fencePool.get(i).update(gameSpeed);
+        }
+
+        for (int i = 0; i < enemyPool.size(); i++) {
+            enemyPool.get(i).update(gameSpeed);
+        }
+    }
+
+    private void updateDifficulty() {
+        if (tickCount % 300 == 0 && tickCount > 0) {
+            int level = tickCount / 300;
+            gameSpeed = Math.min(BASE_GAME_SPEED + level * 2, 22);
+            camera.setSpeed(5f + level * 0.8f);
+        }
+    }
+
+    private int getRightmostObstacleX() {
+        int maxX = -1;
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.x + block.drawWidth > maxX) {
+                maxX = block.x + block.drawWidth;
+            }
+        }
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (fence.active && fence.x + fence.drawWidth > maxX) {
+                maxX = fence.x + fence.drawWidth;
+            }
+        }
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (enemy.active && enemy.x + enemy.drawWidth > maxX) {
+                maxX = enemy.x + enemy.drawWidth;
+            }
+        }
+        return maxX;
+    }
+
+    private int getSpawnX() {
+        int rightmost = getRightmostObstacleX();
+        int minGap = blockSize + blockSize / 2;
+        int spawnX = screenWidth;
+        if (rightmost > spawnX - minGap) {
+            spawnX = rightmost + minGap;
+        }
+        return spawnX;
+    }
+
+    private void spawnObstacle() {
+        int roll = random.nextInt(100);
+
+        if (roll < 30) {
+            spawnBlock();
+        } else if (roll < 50) {
+            spawnEnemy();
+        } else if (roll < 65) {
+            spawnFence();
+        } else if (roll < 80) {
+            spawnBlock();
+            spawnEnemy();
+        } else {
+            spawnBlock();
+            spawnBlockOffset(blockSize + blockSize / 4);
+        }
+    }
+
+    private void spawnBlock() {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (!block.active) {
+                Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
+                int blockY = screenHeight - tileSize - blockSize;
+                block.spawn(randomBitmap, getSpawnX(), blockY, blockSize, blockSize);
+                return;
+            }
+        }
+    }
+
+    private void spawnBlockOffset(int offset) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (!block.active) {
+                Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
+                int blockY = screenHeight - tileSize - blockSize;
+                block.spawn(randomBitmap, getSpawnX() + offset, blockY, blockSize, blockSize);
+                return;
+            }
+        }
+    }
+
+    private void spawnFence() {
+        if (fenceBitmap == null) return;
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (!fence.active) {
+                int fenceY = screenHeight - tileSize - fenceHeight;
+                Fence.Pattern pattern = Fence.Pattern.values()[random.nextInt(Fence.Pattern.values().length)];
+                fence.spawn(fenceBitmap, fenceBrokenBitmap, getSpawnX(), fenceY, fenceWidth, fenceHeight, pattern);
+                return;
+            }
+        }
+    }
+
+    private void spawnEnemy() {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (!enemy.active) {
+                int groundY = screenHeight - tileSize - enemySize;
+                enemy.spawn(sawFrames, sawDeathBitmap, getSpawnX(), groundY, enemySize);
+                soundManager.playGhostAppear();
+                return;
+            }
+        }
+    }
+
+    private void checkBlockCollisions() {
+        Rect playerRect = player.getRect();
+
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (!block.active) {
+                continue;
+            }
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, block.getRect());
+
+            switch (side) {
+                case TOP:
+                    player.setY(block.getRect().top - playerRect.height());
+                    player.setVy(0);
+                    player.setOnGround(true);
+                    coins++;
+                    block.active = false;
+                    soundManager.playBoxBreak();
+                    break;
+                case LEFT:
+                case RIGHT:
+                    loseLife();
+                    block.active = false;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    private void checkFenceCollisions() {
+        Rect playerRect = player.getRect();
+
+        for (int i = 0; i < fencePool.size(); i++) {
+            Fence fence = fencePool.get(i);
+            if (!fence.active || fence.broken) {
+                continue;
+            }
+
+            Rect fenceRect = fence.getRect();
+
+            if (playerRect.right < fenceRect.left && fenceRect.left - playerRect.right < 600) {
+                if (!drawingMode) {
+                    startDrawingMode(fence);
+                }
+            }
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, fenceRect);
+            if (side == CollisionManager.Side.LEFT || side == CollisionManager.Side.RIGHT) {
+                loseLife();
+                fence.active = false;
+                drawingMode = false;
+            } else if (side == CollisionManager.Side.TOP) {
+                player.setY(fenceRect.top - playerRect.height());
+                player.setVy(0);
+                player.setOnGround(true);
+            }
+        }
+    }
+
+    private void checkEnemyCollisions() {
+        Rect playerRect = player.getRect();
+
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (!enemy.active || enemy.isDead) {
+                continue;
+            }
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, enemy.getRect());
+
+            switch (side) {
+                case TOP:
+                    player.setVy(-10f);
+                    enemy.kill();
+                    coins++;
+                    break;
+                case LEFT:
+                case RIGHT:
+                    loseLife();
+                    enemy.kill();
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    private void startDrawingMode(Fence fence) {
+        drawingMode = true;
+        targetFence = fence;
+        allStrokes.clear();
+        currentStroke.clear();
+        drawingFailure = false;
+    }
+
+    private void loseLife() {
+        lives--;
+        hud.setLives(lives);
+        if (lives <= 0) {
+            gameOver = true;
+            launchGameOver();
+        }
+    }
+
+    private void launchGameOver() {
+        soundManager.stopMusic();
+        post(() -> {
+            Context ctx = getContext();
+            if (ctx instanceof Activity && ((Activity) ctx).isFinishing()) return;
+            Intent intent = new Intent(ctx, GameOverActivity.class);
+            intent.putExtra(GameOverActivity.EXTRA_DISTANCE, (int) (camera.getX() / 10));
+            intent.putExtra(GameOverActivity.EXTRA_COINS, coins);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            ctx.startActivity(intent);
+        });
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
+            float lux = event.values[0];
+            boolean currentlyCovered = (lux < 10);
+
+            if (currentlyCovered && !isLightSensorCovered) {
+                killAllEnemies();
+            }
+
+            isLightSensorCovered = currentlyCovered;
+        }
+    }
+
+    private void killAllEnemies() {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (enemy.active && !enemy.isDead) {
+                enemy.kill();
+            }
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+    }
+
+    public int getLives() {
+        return lives;
+    }
+
+    public boolean isGameOver() {
+        return gameOver;
+    }
+
+    public Camera getCamera() {
+        return camera;
+    }
+
+    public void triggerJump() {
+        if (player != null) {
+            player.jump();
+            soundManager.playJump();
+        }
+    }
+
+    public void cleanup() {
+        if (thread != null) {
+            thread.setRunning(false);
+            thread.interrupt();
+            try {
+                thread.join(500);
+            } catch (InterruptedException ignored) {}
+        }
+        sensorManager.unregisterListener(this);
     }
 }

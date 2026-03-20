@@ -3,11 +3,14 @@ package com.example.superpeachsis;
 import android.graphics.Canvas;
 import android.view.SurfaceHolder;
 
-public class GameThread extends Thread{
-    private SurfaceHolder surfaceHolder;
-    private GameView gameView;
-    private boolean running;
-    private Canvas canvas;
+public class GameThread extends Thread {
+
+    private static final int TARGET_FPS = 60;
+    private static final long FRAME_DURATION_NS = 1_000_000_000L / TARGET_FPS;
+
+    private final SurfaceHolder surfaceHolder;
+    private final GameView gameView;
+    private volatile boolean running;
 
     public GameThread(SurfaceHolder surfaceHolder, GameView gameView) {
         super();
@@ -17,16 +20,20 @@ public class GameThread extends Thread{
 
     @Override
     public void run() {
+        long nextFrameTime = System.nanoTime();
+
         while (running) {
-            canvas = null;
+            Canvas canvas = null;
+
             try {
-                canvas = this.surfaceHolder.lockCanvas();
-                synchronized(surfaceHolder) {
-                    this.gameView.update();
-                    this.gameView.draw(canvas);
+                canvas = surfaceHolder.lockCanvas();
+                if (canvas != null) {
+                    synchronized (surfaceHolder) {
+                        gameView.update();
+                        gameView.draw(canvas);
+                    }
                 }
-            } catch (Exception e) {}
-            finally {
+            } finally {
                 if (canvas != null) {
                     try {
                         surfaceHolder.unlockCanvasAndPost(canvas);
@@ -34,6 +41,19 @@ public class GameThread extends Thread{
                         e.printStackTrace();
                     }
                 }
+            }
+
+            nextFrameTime += FRAME_DURATION_NS;
+            long sleepNs = nextFrameTime - System.nanoTime();
+
+            if (sleepNs > 0) {
+                try {
+                    Thread.sleep(sleepNs / 1_000_000, (int) (sleepNs % 1_000_000));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            } else {
+                nextFrameTime = System.nanoTime();
             }
         }
     }
