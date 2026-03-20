@@ -7,6 +7,7 @@ public class Block {
     public Bitmap bitmap;
     public int x, y;
     public boolean active;
+    private final Rect rect = new Rect();
 
     public Block() {
         this.active = false;
@@ -15,7 +16,8 @@ public class Block {
     public Rect getRect() {
         int w = bitmap != null ? bitmap.getWidth() : 0;
         int h = bitmap != null ? bitmap.getHeight() : 0;
-        return new Rect(x, y, x + w, y + h);
+        rect.set(x, y, x + w, y + h);
+        return rect;
     }
 
     public void spawn(Bitmap bitmap, int x, int y) {

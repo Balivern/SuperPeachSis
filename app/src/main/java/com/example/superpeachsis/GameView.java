@@ -31,11 +31,15 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private static final int TILE_SIZE = 64;
     private static final int PLAYER_HEIGHT = 128;
     private static final float PARALLAX_FACTOR = 0.3f;
+    private static final int POOL_SIZE = 30;
+    private static final int BASE_GAME_SPEED = 6;
 
     private int screenWidth;
     private int screenHeight;
+    private int gameSpeed = BASE_GAME_SPEED;
+    private int tickCount = 0;
 
-    private String[] backgroundFiles = {
+    private final String[] backgroundFiles = {
             "background_clouds",
             "background_solid_sky",
             "background_fade_hills",
@@ -48,20 +52,21 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             "background_color_mushrooms"
     };
 
-    private List<Block> blockPool = new ArrayList<>();
-    private List<Bitmap> blockBitmaps = new ArrayList<>();
-    private Random random = new Random();
-    private int nextSpawnTick = 0;
-    private final int POOL_SIZE = 10;
-    private final int GAME_SPEED = 10;
+    private final List<Block> blockPool = new ArrayList<>();
+    private final List<Bitmap> blockBitmaps = new ArrayList<>();
+    private final Random random = new Random();
+    private int nextSpawnTick = 60;
     private int lives = 3;
     private boolean gameOver = false;
+
+    private final Rect bgRect = new Rect();
+    private final Rect tileRect = new Rect();
 
     public GameView(Context context) {
         super(context);
         getHolder().addCallback(this);
         spriteManager = SpriteManager.getInstance(context);
-        camera = new Camera(3f);
+        camera = new Camera(10f);
         thread = new GameThread(getHolder(), this);
         setFocusable(true);
         loadSprites();
@@ -89,7 +94,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         screenHeight = getHeight();
 
         if (player != null) {
-            player.setY(screenHeight - TILE_SIZE - 64);
+            player.setX(screenWidth / 4f);
+            player.setY(screenHeight - TILE_SIZE - PLAYER_HEIGHT);
         }
 
         if (thread.getState() == Thread.State.TERMINATED) {
@@ -138,13 +144,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             return;
         }
         float parallaxX = -(camera.getX() * PARALLAX_FACTOR) % screenWidth;
-        Rect dst = new Rect(0, 0, screenWidth, screenHeight);
+        bgRect.set(0, 0, screenWidth, screenHeight);
 
         canvas.save();
         canvas.translate(parallaxX, 0);
-        canvas.drawBitmap(backgroundBitmap, null, dst, null);
+        canvas.drawBitmap(backgroundBitmap, null, bgRect, null);
         canvas.translate(screenWidth, 0);
-        canvas.drawBitmap(backgroundBitmap, null, dst, null);
+        canvas.drawBitmap(backgroundBitmap, null, bgRect, null);
         canvas.restore();
     }
 
@@ -157,15 +163,15 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         int tilesNeeded = (screenWidth / TILE_SIZE) + 2;
 
         for (int i = 0; i < tilesNeeded; i++) {
-            float tileX = offsetX + (i * TILE_SIZE);
-            canvas.drawBitmap(groundTile, null,
-                    new Rect((int) tileX, groundY, (int) tileX + TILE_SIZE, groundY + TILE_SIZE),
-                    null);
+            int tileX = (int) (offsetX + (i * TILE_SIZE));
+            tileRect.set(tileX, groundY, tileX + TILE_SIZE, groundY + TILE_SIZE);
+            canvas.drawBitmap(groundTile, null, tileRect, null);
         }
     }
 
     private void drawBlocks(Canvas canvas) {
-        for (Block block : blockPool) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
             if (block.active && block.bitmap != null) {
                 canvas.drawBitmap(block.bitmap, block.x, block.y, null);
             }
@@ -183,12 +189,14 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             return;
         }
 
+        tickCount++;
+        updateDifficulty();
         camera.update();
 
         if (player != null) {
             player.update();
 
-            int groundY = screenHeight - TILE_SIZE - player.getRect().height();
+            int groundY = screenHeight - TILE_SIZE - PLAYER_HEIGHT;
             if (player.getY() > groundY) {
                 player.setY(groundY);
                 player.setVy(0);
@@ -203,15 +211,35 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             nextSpawnTick = 60 + random.nextInt(120);
         }
 
-        for (Block block : blockPool) {
-            block.update(GAME_SPEED);
+        for (int i = 0; i < blockPool.size(); i++) {
+            blockPool.get(i).update(gameSpeed);
+        }
+    }
+
+    private void updateDifficulty() {
+        if (tickCount % 600 == 0) {
+            gameSpeed = Math.min(BASE_GAME_SPEED + (tickCount / 600), 14);
+            camera.setSpeed(3f + (tickCount / 600f) * 0.5f);
+        }
+    }
+
+    private void spawnBlock() {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (!block.active) {
+                Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
+                int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
+                block.spawn(randomBitmap, screenWidth, blockY);
+                return;
+            }
         }
     }
 
     private void checkBlockCollisions() {
-        android.graphics.Rect playerRect = player.getRect();
+        Rect playerRect = player.getRect();
 
-        for (Block block : blockPool) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
             if (!block.active) {
                 continue;
             }
@@ -247,17 +275,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
     public boolean isGameOver() {
         return gameOver;
-    }
-
-    private void spawnBlock() {
-        for (Block block : blockPool) {
-            if (!block.active) {
-                Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
-                int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
-                block.spawn(randomBitmap, getWidth(), blockY);
-                break;
-            }
-        }
     }
 
     public Camera getCamera() {

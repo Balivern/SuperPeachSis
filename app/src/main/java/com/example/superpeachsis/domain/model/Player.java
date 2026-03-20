@@ -89,11 +89,11 @@ public class Player {
         }
     }
 
+    private final Rect rect = new Rect();
+
     public Rect getRect() {
-        Bitmap frame = getCurrentFrame();
-        int w = frame != null ? frame.getWidth() : 48;
-        int h = frame != null ? frame.getHeight() : 48;
-        return new Rect((int) x, (int) y, (int) x + w, (int) y + h);
+        rect.set((int) x, (int) y, (int) x + drawWidth, (int) y + drawHeight);
+        return rect;
     }
 
     public float getX() { return x; }
