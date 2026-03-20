@@ -238,10 +238,6 @@ public class MenuActivity extends Activity {
                         overridePendingTransition(0, 0);
                     }, 200);
                 } else if (btnScores != null && btnScores.contains(x, y)) {
-                    showScoresDialog();
-                } else if (btnQuitter != null && btnQuitter.contains(x, y)) {
-                    SpriteManager.reset();
-                    finish();
                     startActivity(new Intent(MenuActivity.this, ScoreBoardActivity.class));
                 }
             }
