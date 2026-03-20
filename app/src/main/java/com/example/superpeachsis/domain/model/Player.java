@@ -27,6 +27,8 @@ public class Player {
 
     private static final float GRAVITY = 0.8f;
     private static final float MAX_VY = 15f;
+    private int drawHeight = 128;
+    private int drawWidth = 128;
 
     public Player(float x, float y, SpriteManager spriteManager) {
         this.x = x;
@@ -65,7 +67,9 @@ public class Player {
     public void draw(Canvas canvas) {
         Bitmap currentFrame = getCurrentFrame();
         if (currentFrame != null) {
-            canvas.drawBitmap(currentFrame, x, y, null);
+            drawWidth = (int) (currentFrame.getWidth() * ((float) drawHeight / currentFrame.getHeight()));
+            Rect dst = new Rect((int) x, (int) y, (int) x + drawWidth, (int) y + drawHeight);
+            canvas.drawBitmap(currentFrame, null, dst, null);
         }
     }
 
@@ -98,6 +102,7 @@ public class Player {
     public void setY(float y) { this.y = y; }
     public float getVy() { return vy; }
     public void setVy(float vy) { this.vy = vy; }
+    public int getDrawHeight() { return drawHeight; }
     public State getState() { return state; }
     public void setState(State state) { this.state = state; }
 }

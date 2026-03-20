@@ -29,6 +29,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private Bitmap groundTile;
 
     private static final int TILE_SIZE = 64;
+    private static final int PLAYER_HEIGHT = 128;
     private static final float PARALLAX_FACTOR = 0.3f;
 
     private int screenWidth;
@@ -88,7 +89,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         screenHeight = getHeight();
 
         if (player != null) {
-            player.setY(screenHeight - TILE_SIZE - player.getRect().height());
+            player.setY(screenHeight - TILE_SIZE - 64);
         }
 
         if (thread.getState() == Thread.State.TERMINATED) {
