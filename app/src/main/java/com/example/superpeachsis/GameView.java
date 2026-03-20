@@ -2,58 +2,45 @@ package com.example.superpeachsis;
 
 import android.app.Activity;
 import android.content.Context;
-
-import android.graphics.Paint;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Rect;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.view.MotionEvent;
-import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import com.example.superpeachsis.domain.model.Enemy;
 
+import com.example.superpeachsis.domain.model.Block;
+import com.example.superpeachsis.domain.model.Enemy;
+import com.example.superpeachsis.domain.model.Player;
 import com.example.superpeachsis.domain.service.HUD;
 import com.example.superpeachsis.ui.GameOverActivity;
 import com.example.superpeachsis.ui.MenuActivity;
-
 import com.example.superpeachsis.utils.Camera;
 import com.example.superpeachsis.utils.CollisionManager;
-import com.example.superpeachsis.domain.model.Player;
-import com.example.superpeachsis.domain.model.Block;
 import com.example.superpeachsis.utils.SpriteManager;
 
-import java.util.Iterator;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
 public class GameView extends SurfaceView implements SurfaceHolder.Callback, SensorEventListener {
-    private Paint trailPaint;
-    private List<TrailPoint> trailPoints = new ArrayList<>();
-    private static class TrailPoint {
-        float x, y;
-        long timestamp;
-        TrailPoint(float x, float y) {
-            this.x = x;
-            this.y = y;
-            this.timestamp = System.currentTimeMillis();
-        }
-    }
-    private static final long TRAIL_LIFETIME = 300;
-    private SensorManager sensorManager;
-    private Sensor lightSensor;
+
     private GameThread thread;
     private SpriteManager spriteManager;
     private Camera camera;
     private Player player;
     private final HUD hud;
+
+    private SensorManager sensorManager;
+    private Sensor lightSensor;
 
     private Bitmap backgroundBitmap;
     private Bitmap groundTile;
@@ -63,6 +50,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private static final float PARALLAX_FACTOR = 0.3f;
     private static final int POOL_SIZE = 30;
     private static final int BASE_GAME_SPEED = 6;
+    private static final int ENEMY_POOL_SIZE = 5;
+    private static final long TRAIL_LIFETIME = 300;
 
     private int screenWidth;
     private int screenHeight;
@@ -84,6 +73,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     private final List<Block> blockPool = new ArrayList<>();
     private final List<Bitmap> blockBitmaps = new ArrayList<>();
+    private final List<Enemy> enemyPool = new ArrayList<>();
+    private final List<Bitmap> sawFrames = new ArrayList<>();
+    private Bitmap sawDeathBitmap;
     private final Random random = new Random();
     private int nextSpawnTick = 60;
     private int lives = 3;
@@ -92,17 +84,19 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     private final Rect bgRect = new Rect();
     private final Rect tileRect = new Rect();
-    private List<Block> blockPool = new ArrayList<>();
-    private List<Bitmap> blockBitmaps = new ArrayList<>();
-    private List<Enemy> enemyPool = new ArrayList<>();
-    private List<Bitmap> sawFrames = new ArrayList<>();
-    private Bitmap sawDeathBitmap;
-    private static final int ENEMY_POOL_SIZE = 5;
-    private float lastTouchX, lastTouchY;
-    private Random random = new Random();
-    private int nextSpawnTick = 0;
-    private final int POOL_SIZE = 10;
-    private final int GAME_SPEED = 10;
+
+    private Paint trailPaint;
+    private final List<TrailPoint> trailPoints = new ArrayList<>();
+
+    private static class TrailPoint {
+        float x, y;
+        long timestamp;
+        TrailPoint(float x, float y) {
+            this.x = x;
+            this.y = y;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
 
     public GameView(Context context) {
         super(context);
@@ -110,7 +104,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         spriteManager = SpriteManager.getInstance(context);
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
-        camera = new Camera(3f);
         camera = new Camera(10f);
         thread = new GameThread(getHolder(), this);
         hud = new HUD(spriteManager);
@@ -137,7 +130,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         backgroundBitmap = spriteManager.getBackground(randomBg);
         groundTile = spriteManager.getTile("terrain_grass_block_top");
 
-        // Chargement des bitmaps des blocs
         blockBitmaps.add(spriteManager.loadBitmap("tiles/block_red.png"));
         blockBitmaps.add(spriteManager.loadBitmap("tiles/block_blue.png"));
         blockBitmaps.add(spriteManager.loadBitmap("tiles/block_green.png"));
@@ -147,8 +139,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             blockPool.add(new Block());
         }
 
-        // Chargement des bitmaps des ennemis
-        sawFrames.clear();
         sawFrames.add(spriteManager.loadBitmap("enemies/saw_a.png"));
         sawFrames.add(spriteManager.loadBitmap("enemies/saw_b.png"));
         sawDeathBitmap = spriteManager.loadBitmap("enemies/saw_rest.png");
@@ -257,7 +247,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void drawEnemies(Canvas canvas) {
-        for (Enemy enemy : enemyPool) {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
             if (enemy.active) {
                 canvas.drawBitmap(enemy.getCurrentBitmap(), enemy.x, enemy.y, null);
             }
@@ -277,7 +268,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             TrailPoint p1 = trailPoints.get(i);
             TrailPoint p2 = trailPoints.get(i + 1);
 
-            // Calcul de l'opacité (fade out)
             long age = System.currentTimeMillis() - p1.timestamp;
             int alpha = (int) (255 * (1 - (float) age / TRAIL_LIFETIME));
             if (alpha < 0) alpha = 0;
@@ -289,10 +279,32 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_UP) {
+        int action = event.getAction();
+
+        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_DOWN) {
+            trailPoints.add(new TrailPoint(event.getX(), event.getY()));
+            checkBlockDestruction(event.getX(), event.getY());
+        }
+
+        if (action == MotionEvent.ACTION_UP) {
             hud.onTouch(event.getX(), event.getY());
         }
+
         return true;
+    }
+
+    private void checkBlockDestruction(float tx, float ty) {
+        for (int i = 0; i < blockPool.size(); i++) {
+            Block block = blockPool.get(i);
+            if (block.active && block.bitmap != null) {
+                Rect r = new Rect(block.x, block.y,
+                        block.x + block.bitmap.getWidth(), block.y + block.bitmap.getHeight());
+                if (r.contains((int) tx, (int) ty)) {
+                    block.active = false;
+                    coins++;
+                }
+            }
+        }
     }
 
     public HUD getHud() { return hud; }
@@ -323,6 +335,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             }
 
             checkBlockCollisions();
+            checkEnemyCollisions();
         }
 
         nextSpawnTick--;
@@ -338,16 +351,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         for (int i = 0; i < blockPool.size(); i++) {
             blockPool.get(i).update(gameSpeed);
         }
-    }
 
-    private void updateDifficulty() {
-        if (tickCount % 600 == 0) {
-            gameSpeed = Math.min(BASE_GAME_SPEED + (tickCount / 600), 14);
-            camera.setSpeed(3f + (tickCount / 600f) * 0.5f);
-        }
-
-        for (Enemy enemy : enemyPool) {
-            enemy.update(GAME_SPEED);
+        for (int i = 0; i < enemyPool.size(); i++) {
+            enemyPool.get(i).update(gameSpeed);
         }
 
         long now = System.currentTimeMillis();
@@ -359,6 +365,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
     }
 
+    private void updateDifficulty() {
+        if (tickCount % 600 == 0) {
+            gameSpeed = Math.min(BASE_GAME_SPEED + (tickCount / 600), 14);
+            camera.setSpeed(3f + (tickCount / 600f) * 0.5f);
+        }
+    }
+
     private void spawnBlock() {
         for (int i = 0; i < blockPool.size(); i++) {
             Block block = blockPool.get(i);
@@ -366,6 +379,17 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
                 int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
                 block.spawn(randomBitmap, screenWidth, blockY);
+                return;
+            }
+        }
+    }
+
+    private void spawnEnemy() {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (!enemy.active) {
+                int groundY = screenHeight - TILE_SIZE - 64;
+                enemy.spawn(sawFrames, sawDeathBitmap, screenWidth, groundY);
                 return;
             }
         }
@@ -400,12 +424,34 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         }
     }
 
-    private void spawnEnemy() {
-        for (Enemy enemy : enemyPool) {
-            if (!enemy.active) {
-                int groundY = screenHeight - TILE_SIZE - 64;
-                enemy.spawn(sawFrames, sawDeathBitmap, screenWidth, groundY);
-                break;
+    private void checkEnemyCollisions() {
+        Rect playerRect = player.getRect();
+
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
+            if (!enemy.active || enemy.isDead) {
+                continue;
+            }
+
+            Rect enemyRect = new Rect(enemy.x, enemy.y,
+                    enemy.x + enemy.getCurrentBitmap().getWidth(),
+                    enemy.y + enemy.getCurrentBitmap().getHeight());
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, enemyRect);
+
+            switch (side) {
+                case TOP:
+                    player.setVy(-10f);
+                    enemy.kill();
+                    coins++;
+                    break;
+                case LEFT:
+                case RIGHT:
+                    loseLife();
+                    enemy.kill();
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -433,40 +479,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         });
     }
 
-    public int getLives() {
-        return lives;
-    }
-
-    public boolean isGameOver() {
-        return gameOver;
-    }
-
-    public Camera getCamera() {
-        return camera;
-    }
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_MOVE || event.getAction() == MotionEvent.ACTION_DOWN) {
-            // On ajoute le point actuel à la liste pour le dessin
-            trailPoints.add(new TrailPoint(event.getX(), event.getY()));
-
-            checkBlockDestruction(event.getX(), event.getY());
-        }
-        return true;
-    }
-
-    private void checkBlockDestruction(float tx, float ty) {
-        for (Block block : blockPool) {
-            if (block.active && block.bitmap != null) {
-                Rect r = new Rect(block.x, block.y, block.x + block.bitmap.getWidth(), block.y + block.bitmap.getHeight());
-                if (r.contains((int) tx, (int) ty)) {
-                    block.active = false;
-                }
-            }
-        }
-    }
-
     @Override
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
@@ -478,7 +490,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void killAllEnemies() {
-        for (Enemy enemy : enemyPool) {
+        for (int i = 0; i < enemyPool.size(); i++) {
+            Enemy enemy = enemyPool.get(i);
             if (enemy.active && !enemy.isDead) {
                 enemy.kill();
             }
@@ -487,6 +500,18 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
+    }
+
+    public int getLives() {
+        return lives;
+    }
+
+    public boolean isGameOver() {
+        return gameOver;
+    }
+
+    public Camera getCamera() {
+        return camera;
     }
 
     public void triggerJump() {
