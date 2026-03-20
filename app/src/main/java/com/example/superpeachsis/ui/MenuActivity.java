@@ -225,21 +225,10 @@ public class MenuActivity extends Activity {
                         finish();
                     }, 50);
                 } else if (btnScores != null && btnScores.contains(x, y)) {
-                    showScoresDialog();
+                    startActivity(new Intent(MenuActivity.this, ScoreBoardActivity.class));
                 }
             }
             return true;
-        }
-
-        private void showScoresDialog() {
-            SharedPreferences prefs = getSharedPreferences("superpeachsis_scores", Context.MODE_PRIVATE);
-            int bestScore = prefs.getInt("best_score", 0);
-
-            new AlertDialog.Builder(MenuActivity.this)
-                    .setTitle("Meilleurs scores")
-                    .setMessage("Meilleur score : " + bestScore)
-                    .setPositiveButton("OK", null)
-                    .show();
         }
 
         @Override
