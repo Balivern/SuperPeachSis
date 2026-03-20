@@ -28,6 +28,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private Bitmap groundTile;
 
     private static final int TILE_SIZE = 64;
+    private static final int PLAYER_HEIGHT = 128;
     private static final float PARALLAX_FACTOR = 0.3f;
 
     private int screenWidth;
@@ -85,7 +86,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         screenHeight = getHeight();
 
         if (player != null) {
-            player.setY(screenHeight - TILE_SIZE - 64);
+            player.setX(screenWidth / 4f);
+            player.setY(screenHeight - TILE_SIZE - PLAYER_HEIGHT);
         }
 
         thread.setRunning(true);
@@ -177,7 +179,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         if (player != null) {
             player.update();
 
-            int groundY = screenHeight - TILE_SIZE - 64;
+            int groundY = screenHeight - TILE_SIZE - PLAYER_HEIGHT;
             if (player.getY() > groundY) {
                 player.setY(groundY);
                 player.setVy(0);
@@ -199,8 +201,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         for (Block block : blockPool) {
             if (!block.active) {
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
-                int groundY = screenHeight - TILE_SIZE - 64;
-                block.spawn(randomBitmap, getWidth(), groundY);
+                int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
+                block.spawn(randomBitmap, getWidth(), blockY);
                 break;
             }
         }
