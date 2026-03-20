@@ -9,6 +9,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
 import com.example.superpeachsis.utils.Camera;
+import com.example.superpeachsis.utils.CollisionManager;
 import com.example.superpeachsis.domain.model.Player;
 import com.example.superpeachsis.domain.model.Block;
 import com.example.superpeachsis.utils.SpriteManager;
@@ -52,6 +53,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private int nextSpawnTick = 0;
     private final int POOL_SIZE = 10;
     private final int GAME_SPEED = 10;
+    private int lives = 3;
+    private boolean gameOver = false;
 
     public GameView(Context context) {
         super(context);
@@ -85,9 +88,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         screenHeight = getHeight();
 
         if (player != null) {
-            player.setY(screenHeight - TILE_SIZE - 64);
+            player.setY(screenHeight - TILE_SIZE - player.getRect().height());
         }
 
+        if (thread.getState() == Thread.State.TERMINATED) {
+            thread = new GameThread(getHolder(), this);
+        }
         thread.setRunning(true);
         thread.start();
     }
@@ -172,16 +178,22 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     }
 
     public void update() {
+        if (gameOver) {
+            return;
+        }
+
         camera.update();
 
         if (player != null) {
             player.update();
 
-            int groundY = screenHeight - TILE_SIZE - 64;
+            int groundY = screenHeight - TILE_SIZE - player.getRect().height();
             if (player.getY() > groundY) {
                 player.setY(groundY);
                 player.setVy(0);
             }
+
+            checkBlockCollisions();
         }
 
         nextSpawnTick--;
@@ -195,12 +207,53 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
+    private void checkBlockCollisions() {
+        android.graphics.Rect playerRect = player.getRect();
+
+        for (Block block : blockPool) {
+            if (!block.active) {
+                continue;
+            }
+
+            CollisionManager.Side side = CollisionManager.getCollisionSide(playerRect, block.getRect());
+
+            switch (side) {
+                case TOP:
+                    player.setY(block.getRect().top - playerRect.height());
+                    player.setVy(0);
+                    break;
+                case LEFT:
+                case RIGHT:
+                    loseLife();
+                    block.active = false;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    private void loseLife() {
+        lives--;
+        if (lives <= 0) {
+            gameOver = true;
+        }
+    }
+
+    public int getLives() {
+        return lives;
+    }
+
+    public boolean isGameOver() {
+        return gameOver;
+    }
+
     private void spawnBlock() {
         for (Block block : blockPool) {
             if (!block.active) {
                 Bitmap randomBitmap = blockBitmaps.get(random.nextInt(blockBitmaps.size()));
-                int groundY = screenHeight - TILE_SIZE - 64;
-                block.spawn(randomBitmap, getWidth(), groundY);
+                int blockY = screenHeight - TILE_SIZE - randomBitmap.getHeight();
+                block.spawn(randomBitmap, getWidth(), blockY);
                 break;
             }
         }

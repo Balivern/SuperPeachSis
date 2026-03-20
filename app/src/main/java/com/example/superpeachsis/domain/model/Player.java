@@ -2,6 +2,7 @@ package com.example.superpeachsis.domain.model;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Rect;
 import com.example.superpeachsis.utils.SpriteManager;
 import java.util.List;
 
@@ -84,9 +85,18 @@ public class Player {
         }
     }
 
+    public Rect getRect() {
+        Bitmap frame = getCurrentFrame();
+        int w = frame != null ? frame.getWidth() : 48;
+        int h = frame != null ? frame.getHeight() : 48;
+        return new Rect((int) x, (int) y, (int) x + w, (int) y + h);
+    }
+
     public float getX() { return x; }
     public float getY() { return y; }
+    public void setX(float x) { this.x = x; }
     public void setY(float y) { this.y = y; }
+    public float getVy() { return vy; }
     public void setVy(float vy) { this.vy = vy; }
     public State getState() { return state; }
     public void setState(State state) { this.state = state; }
