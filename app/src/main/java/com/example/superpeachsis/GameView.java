@@ -28,7 +28,6 @@ import com.example.superpeachsis.utils.CollisionManager;
 import com.example.superpeachsis.utils.SpriteManager;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
@@ -52,12 +51,9 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private static final int POOL_SIZE = 30;
     private static final int BASE_GAME_SPEED = 10;
     private static final int ENEMY_POOL_SIZE = 10;
-    private static final long TRAIL_LIFETIME = 300;
     private static final int MIN_SPAWN_DELAY = 20;
     private static final int BASE_SPAWN_DELAY = 50;
     private static final int SPAWN_RANGE = 60;
-    private static final int BASE_GAME_SPEED = 6;
-    private static final int ENEMY_POOL_SIZE = 5;
 
     private int screenWidth;
     private int screenHeight;
@@ -84,7 +80,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private Bitmap fenceBrokenBitmap;
     private final List<Enemy> enemyPool = new ArrayList<>();
 
-    // Drawing mode state
     private boolean drawingMode = false;
     private Fence targetFence = null;
     private final List<TrailPoint> currentStroke = new ArrayList<>();
@@ -145,7 +140,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
         overlayPaint = new Paint();
         overlayPaint.setColor(Color.BLACK);
-        overlayPaint.setAlpha(40); // Very light overlay
+        overlayPaint.setAlpha(40);
     }
 
     private void loadSprites() {
@@ -244,7 +239,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private void drawDrawingOverlay(Canvas canvas) {
         canvas.drawRect(0, 0, screenWidth, screenHeight, overlayPaint);
 
-        // Draw pattern to recognize hint
         Paint hintPaint = new Paint();
         hintPaint.setColor(Color.WHITE);
         hintPaint.setTextSize(60);
@@ -255,12 +249,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
         drawingPaint.setColor(drawingFailure ? Color.RED : Color.WHITE);
 
-        // Draw current stroke
         drawStroke(canvas, currentStroke);
 
-        // Draw previous strokes
-        for (List<TrailPoint> stroke : allStrokes) {
-            drawStroke(canvas, stroke);
+        for (int i = 0; i < allStrokes.size(); i++) {
+            drawStroke(canvas, allStrokes.get(i));
         }
     }
 
@@ -347,6 +339,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             return true;
         }
 
+        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_DOWN) {
+            checkBlockDestruction(x, y);
+        }
+
         if (action == MotionEvent.ACTION_UP) {
             hud.onTouch(x, y);
         }
@@ -366,6 +362,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 }
             }
         }
+    }
+
     private void handleDrawingInput(int action, float x, float y) {
         switch (action) {
             case MotionEvent.ACTION_DOWN:
@@ -408,8 +406,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             targetFence = null;
             allStrokes.clear();
         } else {
-            // For circle and line, if failed on one stroke, it's a failure.
-            // For cross, we might need to wait for the second stroke.
             if (targetFence.expectedPattern != Fence.Pattern.CROSS || allStrokes.size() >= 2) {
                 drawingFailure = true;
                 allStrokes.clear();
@@ -423,7 +419,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         TrailPoint end = points.get(points.size() - 1);
         float dist = (float) Math.hypot(start.x - end.x, start.y - end.y);
 
-        // End near start
         if (dist > 200) return false;
 
         float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
@@ -438,10 +433,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
         float width = maxX - minX;
         float height = maxY - minY;
 
-        // Significant size
         if (width < 100 || height < 100) return false;
 
-        // Aspect ratio
         float ratio = width / height;
         return ratio > 0.5f && ratio < 2.0f;
     }
@@ -465,14 +458,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private boolean isCross(List<TrailPoint> s1, List<TrailPoint> s2) {
         if (s1.size() < 5 || s2.size() < 5) return false;
 
-        // Simple intersection check of bounding boxes first
         Rect r1 = getBoundingBox(s1);
         Rect r2 = getBoundingBox(s2);
 
         if (!Rect.intersects(r1, r2)) return false;
 
-        // Check if both are somewhat "diagonal" or just "straight" lines
-        // For simplicity, if they intersect and have significant size, we call it a cross
         return r1.width() > 100 && r1.height() > 100 && r2.width() > 100 && r2.height() > 100;
     }
 
@@ -485,7 +475,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             if (p.y < minY) minY = p.y;
             if (p.y > maxY) maxY = p.y;
         }
-        return new Rect((int)minX, (int)minY, (int)maxX, (int)maxY);
+        return new Rect((int) minX, (int) minY, (int) maxX, (int) maxY);
     }
 
     public HUD getHud() { return hud; }
@@ -507,9 +497,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             player.update();
 
             int groundY = screenHeight - TILE_SIZE - PLAYER_HEIGHT;
-            if (player.getY() > groundY) {
+            if (player.getY() >= groundY) {
                 player.setY(groundY);
                 player.setVy(0);
+                player.setOnGround(true);
                 if (player.getState() == Player.State.JUMPING) {
                     player.setState(Player.State.RUNNING);
                 }
@@ -520,7 +511,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             checkEnemyCollisions();
         }
 
-        // Deactivate drawing mode if target is gone or broken
         if (drawingMode && targetFence != null) {
             if (!targetFence.active || targetFence.broken || targetFence.x + TILE_SIZE < player.getX()) {
                 drawingMode = false;
@@ -534,15 +524,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             spawnObstacle();
             int delay = Math.max(MIN_SPAWN_DELAY, BASE_SPAWN_DELAY - (tickCount / 300));
             nextSpawnTick = delay + random.nextInt(Math.max(10, SPAWN_RANGE - (tickCount / 400)));
-            int spawnType = random.nextInt(3);
-            if (spawnType == 0) {
-                spawnBlock();
-            } else if (spawnType == 1) {
-                spawnFence();
-            } else {
-                spawnEnemy();
-            }
-            nextSpawnTick = 60 + random.nextInt(120);
         }
 
         for (int i = 0; i < blockPool.size(); i++) {
@@ -569,11 +550,13 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     private void spawnObstacle() {
         int roll = random.nextInt(100);
 
-        if (roll < 40) {
+        if (roll < 30) {
             spawnBlock();
-        } else if (roll < 70) {
+        } else if (roll < 50) {
             spawnEnemy();
-        } else if (roll < 85) {
+        } else if (roll < 65) {
+            spawnFence();
+        } else if (roll < 80) {
             spawnBlock();
             spawnEnemy();
         } else {
@@ -607,6 +590,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
     }
 
     private void spawnFence() {
+        if (fenceBitmap == null) return;
         for (int i = 0; i < fencePool.size(); i++) {
             Fence fence = fencePool.get(i);
             if (!fence.active) {
@@ -644,6 +628,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
                 case TOP:
                     player.setY(block.getRect().top - playerRect.height());
                     player.setVy(0);
+                    player.setOnGround(true);
                     coins++;
                     block.active = false;
                     break;
@@ -669,7 +654,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
 
             Rect fenceRect = fence.getRect();
 
-            // Activate drawing mode if approaching
             if (playerRect.right < fenceRect.left && fenceRect.left - playerRect.right < 600) {
                 if (!drawingMode) {
                     startDrawingMode(fence);
@@ -684,6 +668,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Sen
             } else if (side == CollisionManager.Side.TOP) {
                 player.setY(fenceRect.top - playerRect.height());
                 player.setVy(0);
+                player.setOnGround(true);
             }
         }
     }
